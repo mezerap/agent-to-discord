@@ -34,7 +34,7 @@ Verze 0.1 je určena pro osobního agenta. Hlas, více uživatelů, plánování
 Balíček lze nainstalovat přímo z GitHubu, bez publikace do npm registru:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.2
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.3
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -95,16 +95,26 @@ Po restartu se rozpracované zadání **nespustí znovu**. Použij `!status` pro
 
 ### Smazání vlákna
 
-Při smazání Discord vlákna bot zablokuje další zadání a schválení v této konverzaci, požádá Codex o zastavení aktivního úkolu a po potvrzení zastavení archivuje jeho historii. Teprve po úspěšné archivaci odstraní propojení s Discordem. Nemazají se vytvořené soubory ani historie Codexu; již provedené změny se nevracejí zpět.
+Při smazání Discord vlákna bot zablokuje další zadání a schválení v této konverzaci, požádá Codex o zastavení aktivního úkolu a po potvrzení zastavení archivuje jeho historii. Teprve po úspěšné archivaci odstraní propojení s Discordem. Vytvořené soubory zůstávají zachované; již provedené změny se nevracejí zpět.
 
 Vlákna smazaná během vypnutí bota se kontrolují při startu a opětovném připojení. Kontrola se také opakuje každých 5 minut. Archivace či automatické uzavření Discord vlákna není smazání a konverzaci zachová. Výpadek sítě nebo odebrané oprávnění se za smazání nepovažují. Pokud se úklid nepodaří, zůstane uložený jako čekající a bot jej zkusí znovu každých 10 sekund i po restartu.
+
+### Automatický úklid historie po 90 dnech
+
+Od verze 0.1.3 se historie konverzací spojených se **smazanými Discord vlákny trvale maže po 90 dnech** od chvíle, kdy bot smazání zjistil. Pokud byl bot vypnutý, lhůta začne až po jeho spuštění a potvrzení smazání. Pouhé uzavření nebo archivace Discord vlákna lhůtu nespouští.
+
+Datum se ukládá do trvalého stavu mostu a přežije restart. Úklid běží při startu a potom každou hodinu. Používá rozhraní Codexu `thread/delete`, nikoli ruční mazání jeho interních souborů. Maže pouze zaznamenané konverzace, které jsou stále archivované a nepracují; při chybě se pokus opakuje při další kontrole. Pokud zjistí, že konverzace byla v Codexu obnovena, automatické mazání pro ni zruší.
+
+**Trvalé smazání historie nelze vrátit.** Projekty, přílohy uložené ve workspace, přihlášení, konfigurace a ostatní konverzace se tímto úklidem nemažou. Nejde o omezení celkové velikosti disku ani o mazání záloh či všech provozních logů. Počet archivů čekajících na smazání ukazuje terminálový příkaz `agent-to-discord status`.
+
+Starší archivy vytvořené před verzí 0.1.3 se automaticky nepřebírají: most u nich už nemá spolehlivé propojení na smazané Discord vlákno ani datum smazání. Zachování souboru `state.json` je nutné i pro tento úklid; po jeho ztrátě bot žádné archivy nehádá podle stáří.
 
 ## Docker a trvalá data
 
 Ve svém existujícím kontejneru můžeš pod uživatelem `node` instalovat balíček do volume:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.2
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.3
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start

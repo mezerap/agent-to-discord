@@ -8,7 +8,7 @@ function processIdentity(pid) {
 }
 
 export class Store {
-  constructor(dir) { this.dir = dir; this.state = { version: 1, threads: {}, seen: [] }; this.writes = Promise.resolve(); }
+  constructor(dir) { this.dir = dir; this.state = { version: 1, threads: {}, retiredThreads: {}, seen: [] }; this.writes = Promise.resolve(); }
 
   async open() {
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
@@ -29,6 +29,8 @@ export class Store {
     try {
       this.state = JSON.parse(await readFile(join(this.dir, 'state.json'), 'utf8'));
       if (this.state.version !== 1 || !this.state.threads || !Array.isArray(this.state.seen)) throw new Error('Invalid bridge state.');
+      this.state.retiredThreads ??= {};
+      if (typeof this.state.retiredThreads !== 'object' || Array.isArray(this.state.retiredThreads)) throw new Error('Invalid retention state.');
     } catch (error) { if (error.code !== 'ENOENT') { await this.close(); throw error; } }
   }
 

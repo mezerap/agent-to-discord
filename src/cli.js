@@ -112,5 +112,6 @@ else if (command === 'status') {
   const { readFile } = await import('node:fs/promises');
   const config = configFromEnv(process.env, { tokenRequired: false });
   const state = JSON.parse(await readFile(resolve(config.stateDir, 'state.json'), 'utf8'));
-  console.log(JSON.stringify({ conversations: Object.keys(state.threads).length, activeAtLastSave: Object.values(state.threads).filter(t => t.active).length }, null, 2));
+  console.log(JSON.stringify({ conversations: Object.keys(state.threads).length, activeAtLastSave: Object.values(state.threads).filter(t => t.active).length,
+    archivedAwaitingDeletion: Object.keys(state.retiredThreads || {}).length, archiveRetentionDays: 90 }, null, 2));
 } else console.log('agent-to-discord <setup|start|doctor|status> [--env-file /absolute/path/to/.env]');

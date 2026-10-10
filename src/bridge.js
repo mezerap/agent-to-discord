@@ -5,13 +5,14 @@ import { downloadAttachment, readWorkspaceFile } from './files.js';
 import { ThreadCleanup, isUnknownChannel } from './thread-cleanup.js';
 import { handleCommand } from './commands.js';
 import { TypingIndicator } from './typing.js';
+import { ArchiveRetention, RETENTION_CHECK_MS } from './archive-retention.js';
 
 export const HELP = 'Napiš zadání do tohoto kanálu — založím vlákno. Ve vlákně pokračuje stejná konverzace.\n' +
   '`/help` nápověda · `/status` stav a poslední odpověď · `/stop` zastavení úkolu\n' +
   '`/file cesta` stáhne soubor · `/answer odpoved` odpoví na otázku agenta.\n' +
   'Příkazy / zobrazují výsledek jen tobě. Fungují i původní !help, !status, !stop, !file a !answer.\n' +
   'Přílohy: nejvýše 5 souborů po 8 MiB. Při práci uvidíš indikátor psaní; při čekání na schválení se pozastaví.\n' +
-  'Smazání vlákna zastaví úkol a archivuje konverzaci. Vytvořené soubory zůstanou zachované.';
+  'Smazání vlákna zastaví úkol a archivuje konverzaci. Po 90 dnech od zjištění smazání se její historie trvale odstraní. Vytvořené soubory zůstanou zachované.';
 
 export async function say(channel, text, extra = {}) {
   const content = String(text || '(Prázdná odpověď)');
@@ -32,6 +33,7 @@ export class Bridge {
     this.items = new Map();
     this.questions = new Map();
     this.cleanup = new ThreadCleanup(this);
+    this.retention = new ArchiveRetention(this);
     this.typing = new TypingIndicator({ channels: discord.channels,
       isWorking: id => this.isWorking(id), onMissing: id => { void this.cleanup.remove(id); } });
     this.ready = false;
@@ -57,6 +59,8 @@ export class Bridge {
     this.cleanupTimer.unref();
     this.reconcileTimer = setInterval(() => this.cleanup.reconcile().catch(() => {}), 300_000);
     this.reconcileTimer.unref();
+    this.retentionTimer = setInterval(() => { void this.retention.sweep(); }, RETENTION_CHECK_MS);
+    this.retentionTimer.unref();
     this.rpc.on('notification', event => this.enqueue(event.params?.threadId, () => this.notification(event)));
     this.rpc.on('request', event => this.enqueue(event.params?.threadId, () => this.request(event)));
   }
@@ -79,6 +83,7 @@ export class Bridge {
     }
     await this.store.save();
     await this.cleanup.reconcile();
+    await this.retention.sweep();
     this.ready = true;
   }
 
@@ -387,6 +392,7 @@ export class Bridge {
     this.typing.close();
     clearInterval(this.cleanupTimer);
     clearInterval(this.reconcileTimer);
+    clearInterval(this.retentionTimer);
     for (const pending of this.questions.values()) { clearTimeout(pending.timer); try { this.rpc.reply(pending.id, { answers: {} }); } catch {} }
     this.questions.clear();
     for (const [key, pending] of this.approvals) {
