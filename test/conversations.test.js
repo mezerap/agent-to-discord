@@ -627,3 +627,97 @@ test('input arriving during final destination validation stays queued at the ori
   assert.equal(job.discordId, 'thread'); assert.equal(job.pendingDestination, 'main');
   assert.equal(f.state.queuedMessages.race.targetId, job.codexId);
 });
+
+test('main chat resets on the first message after 24 idle hours and retains the archive for 90 days', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
+  await f.message('Old topic'); const old = f.state.threads.main; await f.finish(old);
+  now += 24 * 60 * 60 * 1000 - 1;
+  await f.message('Still the same topic'); assert.equal(f.state.threads.main, old); await f.finish(old);
+  const oldReply = f.sent.at(-1).id;
+  now += 24 * 60 * 60 * 1000;
+  const before = Date.now(); await f.message('New topic', 'main', oldReply);
+  const fresh = f.state.threads.main, archived = f.state.retiredThreads[old.codexId];
+  assert.notEqual(fresh.codexId, old.codexId); assert.equal(archived.reason, 'idle');
+  assert.ok(archived.deletedAt >= before); assert.equal(RETENTION_MS, 90 * 86400000);
+  assert.equal(f.sent.filter(m => m.content?.includes('Po 24 hodinách')).length, 1);
+  assert.equal(f.calls.at(-1).params.threadId, fresh.codexId);
+  assert.match(f.calls.at(-1).params.input[1].text, /Citovaný obsah/);
+  assert.equal(fresh.lastActivityAt, now);
+});
+
+test('thread conversations and replies to automation results never trigger the main idle reset', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
+  await f.message('Main'); const main = f.state.threads.main; await f.finish(main);
+  await f.message('Thread', 'thread'); const thread = f.state.threads.thread; await f.finish(thread);
+  const job = await createJob(f); const r = f.bridge.record(job.codexId);
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick(); await f.finish(r, 'Scheduled answer');
+  const answer = f.sent.at(-1).id, mainActivity = main.lastActivityAt;
+  now += 48 * 60 * 60 * 1000;
+  await f.message('Thread follow-up', 'thread'); assert.equal(f.state.threads.thread, thread); await f.finish(thread);
+  await f.message('Automation follow-up', 'main', answer); assert.equal(f.calls.at(-1).params.threadId, r.codexId); await f.finish(r);
+  assert.equal(main.lastActivityAt, mainActivity); assert.equal(f.state.threads.main, main);
+  assert.equal(Object.keys(f.state.retiredThreads).length, 0);
+});
+
+test('long-running main work and its queued messages finish in the same context', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
+  await f.message('Long task'); const old = f.state.threads.main;
+  now += 48 * 60 * 60 * 1000; await f.message('Follow up while running');
+  assert.equal(f.bridge.queue.entries('main').length, 1);
+  await f.finish(old); await f.bridge.queue.settle(); await f.bridge.queue.drain('main');
+  assert.equal(f.state.threads.main, old); assert.equal(old.lastActivityAt, now);
+  assert.equal(Object.keys(f.state.retiredThreads).length, 0);
+});
+
+test('messages arriving during idle archive are queued for the new main context', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
+  await f.message('Old'); const old = f.state.threads.main; await f.finish(old);
+  now += 86400000;
+  const call = f.rpc.call; let queued;
+  f.rpc.call = async (method, params) => {
+    if (method === 'thread/archive') {
+      await f.message('Follow the new topic'); queued = f.bridge.queue.entries('main')[0];
+      assert.equal(queued.targetId, null);
+    }
+    return call(method, params);
+  };
+  await f.message('New topic'); const fresh = f.state.threads.main;
+  assert.notEqual(fresh, old); await f.finish(fresh); await f.bridge.queue.settle(); await f.bridge.queue.drain('main');
+  assert.equal(f.calls.at(-1).params.threadId, fresh.codexId);
+  assert.equal(f.bridge.queue.entries('main').length, 0);
+});
+
+test('idle reset prepares dependent automation context first and preserves its schedule', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
+  const job = await createJob(f), old = f.state.threads.main;
+  job.contextPending = true; delete job.codexId; delete f.state.threads[`automation:${job.id}`];
+  const schedule = structuredClone(job.schedule), next = job.nextRun; now += 86400000;
+  await f.message('New unrelated topic');
+  assert.ok(f.state.retiredThreads[old.codexId]); assert.ok(job.codexId);
+  assert.equal(job.contextPending, false); assert.equal(job.status, 'enabled');
+  assert.deepEqual(job.schedule, schedule); assert.equal(job.nextRun, next);
+});
+
+test('uncertain work prevents idle reset; a failed archive never starts the request in a guessed context', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
+  await f.message('Old'); const old = f.state.threads.main; await f.finish(old); now += 86400000;
+  old.uncertain = true; await f.message('Blocked'); assert.equal(f.state.threads.main, old);
+  old.uncertain = false;
+  const call = f.rpc.call, starts = f.calls.filter(c => c.method === 'turn/start').length;
+  f.rpc.call = async (method, params) => { if (method === 'thread/archive') throw new Error('Failed archive'); return call(method, params); };
+  await assert.rejects(f.message('Not replayed'));
+  assert.equal(f.state.threads.main, old); assert.equal(old.retiring, 'idle');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, starts);
+  assert.equal(f.bridge.idleContext.resetting, false);
+});
+
+test('persisted activity survives reconstruction, while legacy chats get a conservative migration timestamp', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); await f.message('Old'); await f.finish(f.state.threads.main);
+  const state = JSON.parse(JSON.stringify(f.state)); state.threads.main.lastActivityAt = Date.now() - 86400000;
+  const saved = state.threads.main.lastActivityAt;
+  const b = new Bridge(f.bridge.config, f.bridge.discord, f.rpc, { state, save: async () => {} }); t.after(() => b.close());
+  assert.equal(state.threads.main.lastActivityAt, saved);
+  delete state.threads.main.lastActivityAt;
+  const before = Date.now(), c = new Bridge(f.bridge.config, f.bridge.discord, f.rpc, { state, save: async () => {} }); t.after(() => c.close());
+  assert.ok(state.threads.main.lastActivityAt >= before);
+});

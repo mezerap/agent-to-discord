@@ -110,7 +110,7 @@ export class ConversationArchives {
       try { await this.bridge.rpc.call('thread/archive', { threadId: record.codexId }); }
       catch (error) { if (!await this.bridge.cleanup.isArchived(record.codexId)) throw error; }
       store.state.retiredThreads[record.codexId] = { codexId: record.codexId, discordId: record.discordId,
-        deletedAt: reason === 'new' ? Date.now() : record.deletedAt, title: record.title || 'Konverzace', kind: record.kind || 'thread', reason, tools: record.tools };
+        deletedAt: ['new', 'idle'].includes(reason) ? Date.now() : record.deletedAt, title: record.title || 'Konverzace', kind: record.kind || 'thread', reason, tools: record.tools };
       delete store.state.threads[key];
       await store.save();
     });

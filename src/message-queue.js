@@ -48,7 +48,7 @@ export class MessageQueue {
       const target = quoted?.ref && b.record(quoted.ref.codexId);
       const record = target?.kind === 'automation' && target.discordId === channelId && !target.deleted && !target.retiring
         ? target : b.store.state.threads[channelId];
-      entry.targetId = record?.codexId || null;
+      entry.targetId = b.idleContext.resetting && record?.kind === 'main' ? null : record?.codexId || null;
       entry.input = await b.messageInput(message, quoted);
       if (b.cleanup.isDeleted(channelId) || !b.store.state.queuedMessages[entry.id]) return;
       entry.status = 'queued';
@@ -165,6 +165,7 @@ export class MessageQueue {
       await b.store.save();
       if (b.cleanup.isDeleted(channelId) || b.closing) return;
       const result = await b.rpc.call('turn/steer', { threadId: record.codexId, expectedTurnId: entry.expectedTurnId, input: entry.input });
+      b.idleContext.touch(record);
       await rememberMessage(b, entry.messageId, record, result.turnId);
       delete b.store.state.queuedMessages[id];
       await b.store.save();

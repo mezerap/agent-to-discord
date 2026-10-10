@@ -12,8 +12,10 @@ import { initializeState, recordsAt, recordKey, rememberMessage, referencedMessa
 import { Scheduler, AUTOMATION_TOOLS } from './scheduler.js';
 import { ConversationUI } from './conversation-ui.js';
 import { MessageQueue } from './message-queue.js';
+import { IdleContext } from './idle-context.js';
 
 export const HELP = 'Hlavní kanál drží společný kontext a odpovídám přímo zde. Každé vlákno má vlastní konverzaci. Vlákno založené u zprávy převezme kontext k dokončenému kroku této zprávy.\n' +
+  'Po 24 hodinách neaktivity začne další běžná zpráva v hlavním chatu nový kontext; původní se archivuje na 90 dní. Běžící práce a fronta mají přednost. Vlákna se automaticky neresetují.\n' +
   '`/new` čistá konverzace · `/archive` archivy · `/automations` opakované úkoly\n' +
   '`/help` nápověda · `/status` stav a poslední odpověď · `/stop` zastavení právě běžícího úkolu\n' +
   '`/queue` fronta zpráv · tlačítko Zahrnout hned doplní běžící úkol bez zastavení. Nové zprávy během práce jinak čekají ve frontě. /stop frontu pozastaví.\n' +
@@ -39,6 +41,7 @@ export class Bridge {
     this.scheduler = new Scheduler(this);
     this.ui = new ConversationUI(this);
     this.queue = new MessageQueue(this);
+    this.idleContext = new IdleContext(this);
     this.retention = new ArchiveRetention(this);
     this.typing = new TypingIndicator({ channels: discord.channels,
       isWorking: id => this.isWorking(id), onMissing: id => { void this.cleanup.remove(id); } });
@@ -146,6 +149,7 @@ export class Bridge {
       if (current?.uncertain || current?.retiring) return say(message.channel, 'Nejprve ověř předchozí úkol přes /status; čekající archivaci dokončí /new.');
       if (!await this.store.remember(message.id)) return;
       const input = await this.messageInput(message, quoted);
+      current = await this.idleContext.beforeMessage(message.channel, current);
       await this.startPrepared(message.channel, { input, text, messageId: message.id }, current);
     } catch (error) {
       if (this.queue.has(message.channelId)) await this.queue.pause(message.channelId);
@@ -175,6 +179,7 @@ export class Bridge {
     if (this.closing) throw new Error('Bridge is closing.');
     if (this.cleanup.isDeleted(channel.id)) return;
     current.runKind = 'user';
+    this.idleContext.touch(current);
     await this.startTurn(current, input, prepared.messageId);
   }
 
@@ -302,6 +307,7 @@ export class Bridge {
       record.active = false;
       record.uncertain = false;
       record.turnId = params.turn.id;
+      this.idleContext.touch(record);
       await this.store.save();
       for (const [key, pending] of this.approvals) if (pending.threadId === record.codexId) this.clearApproval(key);
       const question = this.questions.get(recordKey(this, record));
