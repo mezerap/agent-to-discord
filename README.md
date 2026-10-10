@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.1
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.2
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -146,7 +146,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.1
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.2
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
@@ -194,7 +194,20 @@ If the bridge crashes, its process exits and the container stops; Docker restart
 
 ## Permissions and privacy
 
-Codex uses `workspace-write` and `on-request` approvals, with the user as the approver. The bot does not automatically enable full access or approval without prompting. A one-time command approval may allow an action outside the inner sandbox; user permissions and Docker restrictions still apply. Each button is tied to a specific account, Discord thread, and active task.
+By default (`AGENT_EXECUTION_MODE=sandboxed`), Codex uses `workspace-write` and `on-request` approvals, with the user as the approver. The bot does not automatically enable full access or approval without prompting. A one-time command approval may allow an action outside the inner sandbox; user permissions and Docker restrictions still apply. Each button is tied to a specific account, Discord thread, and active task.
+
+For a container with independent isolation, set `AGENT_EXECUTION_MODE=container` in the private bot `.env` and restart the bot after current tasks finish. This explicitly selects `danger-full-access` with `never` approvals for new, resumed, restored, forked and scheduled conversations. It disables Codex's inner filesystem/network sandbox and command/file approval prompts; it does not grant root or change Docker permissions. The default for all other installations stays sandboxed. Do not enable this mode on a host without an independent sandbox.
+
+Container isolation must be enforced outside the agent: no Docker socket, host directory mounts or privileged mode; restrict access to the host and other containers with network rules and retain resource limits. This setting does not detect whether an arbitrary command could affect the VPS or automatically request host approval. Keep such access blocked and handle host changes separately with the operator. Agent instructions are guidance, not a security boundary. The agent can modify everything accessible to its Unix user, including its own configuration and credentials; shared disk exhaustion is not prevented by memory/CPU limits.
+
+Interactive Codex CLI is configured separately in `$CODEX_HOME/config.toml` (top-level keys, before any `[table]`):
+
+```toml
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+```
+
+These CLI settings are suitable only for the same independently isolated environment. Start a new CLI session to apply them; the bot uses the explicit mode above. See [Codex sandbox documentation](https://learn.chatgpt.com/docs/sandboxing).
 
 The token is not passed to the Codex child process's environment. However, this does not fully isolate secrets: depending on the system, processes running under the same Unix user may be able to read each other's files or environment. The workspace, configuration, and agent are not separate security containers. Do not store the token in the workspace. The bot does not write task content to operational logs; history is stored in Codex and Discord; schedule prompts and message-to-conversation metadata are also stored in the private bridge state, subject to thread deletion and the retention policy described above.
 
