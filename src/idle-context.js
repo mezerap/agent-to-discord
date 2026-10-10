@@ -1,7 +1,7 @@
 import { say } from './messages.js';
 
 export const MAIN_IDLE_MS = 24 * 60 * 60 * 1000;
-export const CONTEXT_WARNING_TOKENS = 30_000;
+export const CONTEXT_WARNING_TOKENS = 100_000;
 
 export class IdleContext {
   constructor(bridge, now = Date.now) {
@@ -30,16 +30,28 @@ export class IdleContext {
 
   async warn(record) {
     if (record.kind !== 'main' || (record.contextUsage?.inputTokens || 0) < CONTEXT_WARNING_TOKENS) return;
-    if (record.contextWarningAt && this.now() - record.contextWarningAt < MAIN_IDLE_MS) return;
+    const snoozedUntil = record.contextSnoozeUntil;
+    if (Number.isFinite(snoozedUntil) && record.contextUsage.inputTokens < snoozedUntil) return;
+    if (!Number.isFinite(snoozedUntil) && record.contextWarningAt && this.now() - record.contextWarningAt < MAIN_IDLE_MS) return;
+    delete record.contextSnoozeUntil;
     record.contextWarningAt = this.now(); await this.bridge.store.save();
     const channel = await this.bridge.discord.channels.fetch(record.discordId);
-    await say(channel, `Kontext posledního vstupu má přibližně ${record.contextUsage.inputTokens.toLocaleString('cs-CZ')} tokenů (hranice upozornění 30 000). Zatím pokračuji ve stejném chatu. Můžeš napsat „archivuj, ale zachovej témata X a Y“ nebo požádat o přenos do vlákna. Návrh nejprve ukážu k potvrzení. /new začne čistě bez zachování témat.`);
+    await say(channel, `Kontext posledního vstupu má přibližně ${record.contextUsage.inputTokens.toLocaleString('cs-CZ')} tokenů (hranice upozornění 100 000). Zatím pokračuji ve stejném chatu. Můžeš napsat „archivuj, ale zachovej témata X a Y“ nebo požádat o přenos do vlákna. Návrh nejprve ukážu k potvrzení. /new začne čistě bez zachování témat.`, { components: [{ type: 1, components: [this.snoozeButton(record)] }] });
+  }
+
+  snoozeButton(record) {
+    return this.bridge.ui.button(record.discordId, 'Připomenout později (+10 000)', async output => {
+      if (this.bridge.record(record.codexId) !== record || record.kind !== 'main' || record.retiring || record.deleted) return say(output, 'Tato konverzace už není aktuální.');
+      record.contextSnoozeUntil = Math.max(CONTEXT_WARNING_TOKENS, record.contextUsage?.inputTokens || 0) + 10_000;
+      await this.bridge.store.save();
+      await say(output, `Upozorním znovu, až poslední vstup dosáhne ${record.contextSnoozeUntil.toLocaleString('cs-CZ')} tokenů. Ani tehdy nic automaticky nearchivuji.`);
+    });
   }
 
   status(record) {
     const u = record?.contextUsage;
     if (!u) return 'Velikost kontextu: Codex ji zatím neohlásil.';
     const percent = u.modelContextWindow > 0 ? ` (~${Math.round(u.inputTokens / u.modelContextWindow * 100)} % kapacity)` : '';
-    return `Poslední vstup: ${u.inputTokens.toLocaleString('cs-CZ')} tokenů${percent}. Hranice upozornění: 30 000. Součet spotřeby: ${u.totalTokens ?? 'neznámý'} tokenů. Údaj zahrnuje historii, instrukce a nástroje; nejde o velikost příštího požadavku.`;
+    return `Poslední vstup: ${u.inputTokens.toLocaleString('cs-CZ')} tokenů${percent}. Hranice upozornění: 100 000. ${record.contextSnoozeUntil ? `Další upozornění od ${record.contextSnoozeUntil.toLocaleString('cs-CZ')} tokenů. ` : ''}Součet spotřeby: ${u.totalTokens ?? 'neznámý'} tokenů. Údaj zahrnuje historii, instrukce a nástroje; nejde o velikost příštího požadavku.`;
   }
 }

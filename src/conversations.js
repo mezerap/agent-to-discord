@@ -14,6 +14,11 @@ export function initializeState(state) {
   }
 }
 
+export function hasPendingWork(bridge, channelId) {
+  return bridge.closing || bridge.busy.has(channelId) || bridge.queue.has(channelId) ||
+    Object.values(bridge.store.state.threads).some(r => r.discordId === channelId && !r.deleted && (r.active || r.uncertain || r.retiring));
+}
+
 export function recordsAt(bridge, channelId) {
   return Object.values(bridge.store.state.threads).filter(r => r.discordId === channelId && !r.deleted && !r.retiring);
 }

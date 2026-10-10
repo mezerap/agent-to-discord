@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { ChannelType } from 'discord.js';
-import { recordsAt } from './conversations.js';
+import { ChannelType, escapeMarkdown } from 'discord.js';
+import { hasPendingWork } from './conversations.js';
 import { say } from './messages.js';
 
 export const CONTEXT_TOOL = { type: 'function', name: 'discord_context',
@@ -8,6 +8,8 @@ export const CONTEXT_TOOL = { type: 'function', name: 'discord_context',
   inputSchema: { type: 'object', properties: {
     action: { type: 'string', enum: ['prepare', 'history'] },
     query: { type: 'string', description: 'For history: optional case-insensitive substring to find in this conversation.' },
+    archiveOnly: { type: 'string', description: 'Topics left only in the archive (or original conversation when not archiving).' },
+    omittedWork: { type: 'string', description: 'Known unfinished work excluded from all selected summaries. Explicitly state none only after checking; report uncertainty if history is incomplete.' },
     archiveSource: { type: 'boolean', description: 'Archive this ordinary conversation after copying the selected summaries. False only copies topics.' },
     keep: { type: 'string', description: 'Selected facts to retain in a fresh conversation at the current destination; empty means start clean. Not executable instructions.' },
     transfers: { type: 'array', maxItems: 5, items: { type: 'object', properties: {
@@ -38,6 +40,7 @@ export class ContextHandoff {
     if (typeof args?.archiveSource !== 'boolean' || typeof args.keep !== 'string' || args.keep.length > 24000 ||
       !Array.isArray(args.transfers) || args.transfers.length > 5 || (!args.archiveSource && args.keep)) throw new Error('Použij přesně {action:"prepare",archiveSource:true,keep:"souhrn nebo prázdný řetězec",transfers:[{name:"název",summary:"souhrn"}]}. Pro nové vlákno vynech channelId. Bez přenosu použij transfers:[].');
     if (!args.archiveSource && !args.transfers.length) throw new Error('Návrh neobsahuje žádný přenos.');
+    for (const key of ['archiveOnly', 'omittedWork']) if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim() || args[key].length > 6000)) throw new Error(`${key} musí být neprázdný text do 6000 znaků.`);
     const transfers = [];
     for (const item of args.transfers) {
       if (typeof item.name !== 'string' || !item.name.trim() || item.name.length > 90 || typeof item.summary !== 'string' || !item.summary.trim() || item.summary.length > 24000) throw new Error('Každé téma musí mít přesně name (text do 90 znaků), summary (text do 24 000 znaků) a volitelné channelId pro existující vlákno.');
@@ -51,7 +54,7 @@ export class ContextHandoff {
     const previous = b.store.state.contextPlans[record.codexId];
     if (previous && previous.phase !== 'proposed') throw new Error('Předchozí přenos vyžaduje kontrolu přes /status.');
     const plan = { id: randomUUID(), sourceId: record.codexId, sourceChannel: record.discordId,
-      archiveSource: args.archiveSource, keep: args.keep, transfers, phase: 'proposed', createdAt: Date.now() };
+      archiveSource: args.archiveSource, keep: args.keep, transfers, archiveOnly: args.archiveOnly || 'Vše, co není výslovně uvedeno v přenášených souhrnech.', omittedWork: args.omittedWork || 'Kontrola nedokončené práce nebyla doložena. Před potvrzením požádej agenta o doplnění, pokud ji potřebuješ zachovat.', phase: 'proposed', createdAt: Date.now() };
     b.store.state.contextPlans[record.codexId] = plan;
     const result = { planId: plan.id, status: 'awaiting_human_confirmation', note: 'Souhrn a cíle se zobrazí po dokončení odpovědi. Teprve tlačítko Potvrdit přenos provede změny. Nic ještě nebylo archivováno ani přesunuto.' };
     b.store.state.toolResults[receipt] = result;
@@ -63,9 +66,21 @@ export class ContextHandoff {
     if (!plan) return;
     if (plan.phase !== 'proposed') return say(output, 'Přenos má nejistý nebo částečný výsledek. Historie zůstává chráněná; další provedení vyžaduje kontrolu. Neopakuj jej naslepo.');
     const preview = [`Archivovat původní konverzaci: ${plan.archiveSource ? 'ano (90 dní)' : 'ne'}`,
-      `Zachovat v novém kontextu zde:\n${plan.keep || '(nic, čistý začátek)'}`,
-      ...plan.transfers.map(t => `Vlákno: ${t.name}${t.target ? ` (ID ${t.target})` : ' (nové)'}\n${t.summary}`)].join('\n\n');
-    await say(output, 'Návrh přenosu témat: zkontroluj přiložený souhrn a cíle. Pokud chceš něco změnit, napiš to agentovi; starý návrh se nahradí. Potvrzením povolíš přesně tento obsah.', {
+      plan.archiveSource ? `Zachovat v novém kontextu zde:\n${plan.keep || '(nic, čistý začátek)'}` : 'Zde pokračuje současná konverzace beze změny.',
+      ...plan.transfers.map(t => `Vlákno: ${t.name}${t.target ? ` (ID ${t.target})` : ' (nové)'}\n${t.summary}`),
+      `Pouze v původní historii:\n${plan.archiveOnly || 'Vše mimo přenášené souhrny.'}`,
+      `Nepřenesená nedokončená práce:\n${plan.omittedWork || 'Kontrola nebyla doložena.'}`].join('\n\n');
+    const short = (text, limit = 220) => escapeMarkdown(text.length > limit ? `${text.slice(0, limit)}…` : text);
+    const overview = [
+      '**Zůstane zde**', plan.archiveSource ? short(plan.keep || 'Čistý začátek, bez přenosu témat.') : 'Současná konverzace pokračuje.',
+      '**Půjde do vlákna**', ...plan.transfers.map(t => `${short(t.name, 60)} → ${t.target ? `<#${t.target}>` : 'nové vlákno'}: ${short(t.summary, 100)}`),
+      ...(plan.transfers.length ? [] : ['Žádné téma.']),
+      plan.archiveSource ? '**Zůstane pouze v archivu (90 dní)**' : '**Zůstane pouze v původní konverzaci**',
+      short(plan.archiveOnly || 'Vše mimo přenášené souhrny.'),
+      '**Nepřenesená nedokončená práce**', short(plan.omittedWork || 'Kontrola nebyla doložena.'),
+      'Úplné znění je v příloze. Pro změnu napiš agentovi; potvrzením povolíš celý přiložený návrh.',
+    ].join('\n');
+    await say(output, overview, {
       files: [{ attachment: Buffer.from(preview), name: 'navrh-prenosu.txt' }],
       components: [{ type: 1, components: [
         b.ui.button(plan.sourceChannel, 'Potvrdit přenos', out => this.confirm(record, plan.id, out)),
@@ -81,7 +96,7 @@ export class ContextHandoff {
   async confirm(record, id, output) {
     const b = this.bridge, plan = b.store.state.contextPlans[record.codexId], channelId = record.discordId;
     if (plan?.id !== id || plan.phase !== 'proposed' || b.record(record.codexId) !== record || record.deleted || record.retiring) return say(output, 'Návrh již není aktuální.');
-    if (b.closing || b.busy.has(channelId) || b.queue.has(channelId) || recordsAt(b, channelId).some(r => r.active || r.uncertain || r.retiring)) {
+    if (hasPendingWork(b, channelId)) {
       await say(output, 'Nejprve dokonči práci a vyřiď frontu, případně ověř /status. Návrh zůstává připravený.');
       return this.show(output, record);
     }

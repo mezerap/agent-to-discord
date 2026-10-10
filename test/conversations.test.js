@@ -629,15 +629,15 @@ test('input arriving during final destination validation stays queued at the ori
 });
 
 
-test('30k warning uses last input not accumulated usage and never archives automatically', async t => {
+test('100k warning uses last input not accumulated usage and never archives automatically', async t => {
   const f = fixture(); t.after(() => f.bridge.close()); await f.message('Work'); const r = f.state.threads.main;
-  await f.bridge.notification({method:'thread/tokenUsage/updated',params:{threadId:r.codexId,tokenUsage:{last:{inputTokens:29999},total:{totalTokens:999999},modelContextWindow:200000}}});
+  await f.bridge.notification({method:'thread/tokenUsage/updated',params:{threadId:r.codexId,tokenUsage:{last:{inputTokens:99999},total:{totalTokens:999999},modelContextWindow:200000}}});
   await f.finish(r); assert.equal(Object.keys(f.state.retiredThreads).length,0);
   assert.ok(!f.sent.some(m => m.content?.includes('hranice upozornění')));
-  await f.message('More'); await f.bridge.idleContext.update(r,{last:{inputTokens:31000},total:{totalTokens:1000000},modelContextWindow:200000}); await f.finish(r);
+  await f.message('More'); await f.bridge.idleContext.update(r,{last:{inputTokens:100000},total:{totalTokens:1000000},modelContextWindow:200000}); await f.finish(r);
   assert.equal(f.sent.filter(m => m.content?.includes('hranice upozornění')).length,1);
   await f.message('Continue'); await f.finish(r); assert.equal(f.sent.filter(m => m.content?.includes('hranice upozornění')).length,1);
-  assert.equal(f.state.threads.main,r); assert.match(f.bridge.idleContext.status(r),/31.?000/);
+  assert.equal(f.state.threads.main,r); assert.match(f.bridge.idleContext.status(r),/100.?000/);
 });
 
 test('24 idle hours now warn but keep the same context; threads do not warn', async t => {
@@ -667,6 +667,7 @@ test('topic transfer supports new and existing threads without copying full hist
   const f=fixture(); t.after(()=>f.bridge.close()); await f.message('Existing thread','thread');const existing=f.state.threads.thread;await f.finish(existing);
   await f.message('Source');const source=f.state.threads.main;
   const result=await planFor(f,{archiveSource:false,keep:'',transfers:[{name:'Topic A',summary:'Only A'},{name:'Topic B',summary:'Only B',channelId:'thread'}]});await f.finish(source);
+  assert.match(f.sent.find(m => m.files?.[0]?.name === 'navrh-prenosu.txt').files[0].attachment.toString(), /pokračuje současná konverzace/);
   await f.bridge.handoff.confirm(source,result.planId,f.output);
   assert.equal(f.state.threads.main,source);assert.equal(f.state.threads.thread,existing);
   const newId=Object.keys(f.state.contextSeeds).find(id=>id!=='thread');assert.ok(newId);
@@ -728,4 +729,68 @@ test('explicit new discards a proposed handoff and unconsumed selected context',
   const f=fixture();t.after(()=>f.bridge.close());await f.message('Source');const r=f.state.threads.main;await planFor(f);await f.finish(r);
   f.state.contextSeeds.main='Old pending selection';await f.bridge.control('new','','main',f.output);
   assert.equal(f.state.contextSeeds.main,undefined);assert.equal(f.state.contextPlans[r.codexId],undefined);
+});
+
+test('new and handoff both wait for other automation work; completion never resets automatically', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  const job = await createJob(f), source = f.state.threads.main, automation = f.bridge.record(job.codexId);
+  const plan = await planFor(f); const schedule = structuredClone(job);
+  for (const flag of ['active', 'uncertain', 'retiring']) {
+    automation[flag] = true;
+    await f.bridge.ui.reset(f.output, 'main');
+    await f.bridge.handoff.confirm(source, plan.planId, f.output);
+    assert.equal(f.state.threads.main, source);
+    assert.equal(f.state.contextPlans[source.codexId].phase, 'proposed');
+    delete automation[flag];
+  }
+  assert.equal(f.state.threads.main, source);
+  await f.bridge.ui.reset(f.output, 'main');
+  assert.ok(f.state.retiredThreads[source.codexId]);
+  assert.equal(f.bridge.record(job.codexId), automation);
+  assert.deepEqual(job, schedule);
+});
+
+test('snooze persists and uses latest input growth instead of time or cumulative usage', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  let now = Date.now(); f.bridge.idleContext.now = () => now;
+  await f.message('Work'); const r = f.state.threads.main;
+  const update = inputTokens => f.bridge.idleContext.update(r, { last: { inputTokens }, total: { totalTokens: 99999999 } });
+  const warnings = () => f.sent.filter(m => m.content?.includes('hranice upozornění'));
+  await update(100000); await f.finish(r);
+  const button = warnings()[0].components[0].components[0];
+  await f.bridge.ui.actions.get(button.custom_id.slice('conversation:'.length)).run(f.output);
+  assert.equal(r.contextSnoozeUntil, 110000);
+  assert.equal(JSON.parse(JSON.stringify(f.state)).threads.main.contextSnoozeUntil, 110000);
+  now += 2 * 86400000;
+  for (const input of [50000, 100000, 109999]) { await update(input); await f.bridge.idleContext.warn(r); }
+  assert.equal(warnings().length, 1);
+  await update(110000); await f.bridge.idleContext.warn(r); assert.equal(warnings().length, 2);
+  assert.equal(r.contextSnoozeUntil, undefined);
+  const nextButton = warnings()[1].components[0].components[0];
+  await f.bridge.ui.actions.get(nextButton.custom_id.slice('conversation:'.length)).run(f.output);
+  await update(120000); await f.bridge.idleContext.warn(r); assert.equal(warnings().length, 3);
+  assert.equal(Object.keys(f.state.retiredThreads).length, 0);
+  const stale = warnings()[2].components[0].components[0];
+  await f.bridge.ui.reset(f.output, 'main'); await f.message('Fresh');
+  await f.bridge.ui.actions.get(stale.custom_id.slice('conversation:'.length)).run(f.output);
+  assert.equal(f.state.threads.main.contextSnoozeUntil, undefined);
+  assert.match(f.sent.at(-1).content, /není aktuální/);
+});
+
+test('handoff preview shows review and destinations inline and preserves complete attachment', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Review topics'); const r = f.state.threads.main;
+  const omittedWork = 'Unfinished BETA validation. '.repeat(40);
+  await planFor(f, { archiveOnly: 'BETA background', omittedWork,
+    transfers: [{ name: 'ALFA', summary: 'Selected facts with file /workspace/alfa.md and next steps' }] });
+  await f.finish(r);
+  const preview = f.sent.find(m => m.files?.[0]?.name === 'navrh-prenosu.txt');
+  assert.match(preview.content, /Zůstane zde/); assert.match(preview.content, /Půjde do vlákna/);
+  assert.match(preview.content, /Zůstane pouze v archivu/);
+  assert.match(preview.content, /BETA background/); assert.match(preview.content, /Unfinished BETA validation/);
+  assert.ok(preview.files[0].attachment.toString().includes(omittedWork));
+  assert.equal(Object.keys(f.state.retiredThreads).length, 0);
+  await assert.rejects(f.bridge.handoff.prepare(r, { threadId: r.codexId, callId: 'invalid-review', arguments: {
+    archiveSource: true, keep: '', transfers: [], omittedWork: '', archiveOnly: 'BETA',
+  } }), /omittedWork/);
 });

@@ -3,7 +3,7 @@ import { ChannelType, escapeMarkdown } from 'discord.js';
 import { authorized } from './config.js';
 import { say } from './messages.js';
 import { RETENTION_MS } from './archive-retention.js';
-import { forgetMessages } from './conversations.js';
+import { forgetMessages, hasPendingWork } from './conversations.js';
 
 export function privateOutput(interaction) {
   let sent = false;
@@ -70,9 +70,7 @@ export class ConversationUI {
   async reset(output, channelId) {
     const b = this.bridge;
     const record = b.store.state.threads[channelId];
-    if (b.queue.has(channelId)) return say(output, 'Nejprve vyřiď nebo odeber zprávy z /queue. /new čekající zprávy nepřesouvá do nové konverzace.');
-    if (b.busy.has(channelId) || record?.active) return say(output, 'Nejprve zastav běžící úkol přes /stop nebo počkej na dokončení.');
-    if (record?.uncertain) return say(output, 'Nejprve ověř předchozí úkol přes /status.');
+    if (hasPendingWork(b, channelId)) return say(output, 'Nejprve dokonči práci v tomto kanálu (včetně automatizací), vyřiď /queue a případně ověř /status. Potom použij /new znovu; reset se sám neprovede.');
     const plan = record && b.store.state.contextPlans[record.codexId];
     if (plan && plan.phase !== 'proposed') return say(output, 'Nejprve ověř rozpracovaný přenos kontextu přes /status.');
     b.busy.add(channelId);
