@@ -11,6 +11,7 @@ import { CodexClient } from './rpc.js';
 import { Store } from './store.js';
 import { Bridge } from './bridge.js';
 import { registerCommands } from './commands.js';
+import { bridgeHealthy, serveHealth, checkHealth } from './health.js';
 
 const command = process.argv[2] || 'help';
 const envIndex = process.argv.indexOf('--env-file');
@@ -57,10 +58,12 @@ async function run() {
   const discord = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent], allowedMentions: { parse: [] } });
   const store = new Store(config.stateDir);
   let bridge;
+  let closeHealth;
   let closing = false;
   const shutdown = async (code = 0) => {
     if (closing) return;
     closing = true;
+    await closeHealth?.();
     bridge?.close();
     discord.destroy();
     rpc.close();
@@ -97,6 +100,7 @@ async function run() {
     bridge = new Bridge(config, discord, rpc, store);
     bridge.attach();
     await bridge.recover();
+    closeHealth = await serveHealth(config.stateDir, () => !closing && bridgeHealthy(discord, rpc));
     console.log('Agent to Discord is ready.');
   } catch (error) {
     // Errors can contain remote/user text. Never log environment or raw API payloads.
@@ -108,6 +112,12 @@ async function run() {
 
 if (command === 'setup') await setup();
 else if (command === 'start' || command === 'doctor') await run();
+else if (command === 'healthcheck') {
+  const config = configFromEnv(process.env, { tokenRequired: false });
+  const healthy = await checkHealth(config.stateDir);
+  console.log(healthy ? 'healthy' : 'unhealthy');
+  process.exitCode = healthy ? 0 : 1;
+}
 else if (command === 'status') {
   const { readFile } = await import('node:fs/promises');
   const config = configFromEnv(process.env, { tokenRequired: false });
@@ -115,4 +125,4 @@ else if (command === 'status') {
   console.log(JSON.stringify({ conversations: Object.keys(state.threads).length, activeAtLastSave: Object.values(state.threads).filter(t => t.active).length,
     archivedAwaitingDeletion: Object.keys(state.retiredThreads || {}).length, archiveRetentionDays: 90, automations: Object.keys(state.schedules || {}).length,
     enabledAutomations: Object.values(state.schedules || {}).filter(j => j.status === 'enabled').length }, null, 2));
-} else console.log('agent-to-discord <setup|start|doctor|status> [--env-file /absolute/path/to/.env]');
+} else console.log('agent-to-discord <setup|start|doctor|status|healthcheck> [--env-file /absolute/path/to/.env]');

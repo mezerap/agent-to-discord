@@ -28,7 +28,7 @@ export class CodexClient extends EventEmitter {
     });
     const result = await this.call('initialize', {
       capabilities: { experimentalApi: true },
-      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.2.0' },
+      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.2.1' },
     });
     this.write({ method: 'initialized', params: {} });
     return result;
@@ -39,13 +39,13 @@ export class CodexClient extends EventEmitter {
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  call(method, params = {}) {
+  call(method, params = {}, timeout = 30_000) {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Codex request timed out: ${method}. Its outcome may be unknown; do not retry automatically.`));
-      }, 30_000);
+      }, timeout);
       this.pending.set(id, { resolve, reject, timer });
       try { this.write({ id, method, params }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }

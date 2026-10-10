@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.0
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.1
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -146,7 +146,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.0
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.1
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
@@ -159,6 +159,21 @@ command: ["/home/node/.codex/bin/agent-to-discord", "start"]
 ```
 
 Make this change only after installation and a successful `doctor` check. Stop any manually started bot before applying the Compose configuration. `restart: unless-stopped` restarts the container after a crash or restart; running the bot through `docker exec` alone does not provide this behavior. Reinstall the package when changing the Node.js major version or architecture.
+
+To check the running bridge instead of only the installed Codex binary, add:
+
+```yaml
+healthcheck:
+  test: ["CMD", "/home/node/.codex/bin/agent-to-discord", "healthcheck"]
+  interval: 60s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+```
+
+`healthcheck` contacts a private Unix socket in `AGENT_STATE_DIR`. It checks the running bot's Discord gateway readiness and asks its existing Codex app-server to report the login state, with a five-second RPC timeout. It starts no extra agent, sends no Discord message, opens no TCP port, and does not run a model task. It fails if the bot is stopped, unresponsive, disconnected, or missing its Codex login. This is a connection check, not an end-to-end model/API or channel-permission test; use `doctor` after changing permissions. Docker marks repeated failures as `unhealthy`; `restart: unless-stopped` alone does not restart a container just because it is unhealthy.
+
+Personal workspace instructions can be stored in `/workspace/AGENTS.md` on the persistent workspace volume. Keep credentials and deployment-specific secrets out of that file and out of the public repository.
 
 The bot runs in the same container as Codex under the regular `node` user. It starts its own `codex app-server --stdio`, using the same `CODEX_HOME` and login. It does not modify or update the separate CLI daemon. The main channel, each Discord thread, and each scheduled task have their own Codex conversations; it does not share your currently open interactive session.
 
