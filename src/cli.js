@@ -92,8 +92,8 @@ async function run() {
 
     await store.open();
     bridge = new Bridge(config, discord, rpc, store);
-    await bridge.recover();
     bridge.attach();
+    await bridge.recover();
     console.log('Agent to Discord is ready.');
   } catch (error) {
     // Errors can contain remote/user text. Never log environment or raw API payloads.

@@ -15,6 +15,7 @@ Inspirováno projektem [Agent2Telegram](https://github.com/petrludwig-collab/Age
 - Výslovné stažení výsledného souboru příkazem `!file cesta`.
 - Jeden povolený uživatel, server a kanál. Automatické zmínky uživatelů/rolí jsou vypnuté.
 - Trvalé mapování konverzací, ochrana proti opakovanému zpracování zpráv a diagnostika připojení.
+- Smazání Discord vlákna přeruší běžící úkol, odmítne čekající schválení a archivuje konverzaci Codexu. Soubory v pracovním adresáři zůstanou zachované.
 
 Verze 0.1 je určena pro osobního agenta. Hlas, více uživatelů, plánování úkolů a připojení k libovolnému existujícímu terminálu nejsou implementované. Během běžícího úkolu bot další zadání odmítne; neudržuje frontu. Obecné žádosti o rozšíření oprávnění a MCP formuláře nepovoluje. Pokud nelze zobrazit příkaz nebo změny souborů, tlačítko schválení zůstane vypnuté.
 
@@ -31,7 +32,7 @@ Verze 0.1 je určena pro osobního agenta. Hlas, více uživatelů, plánování
 Balíček lze nainstalovat přímo z GitHubu, bez publikace do npm registru:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.0
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.1
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -84,12 +85,18 @@ Napiš do povoleného kanálu například „Vytvoř jednoduchou HTML stránku�
 
 Po restartu se rozpracované zadání **nespustí znovu**. Použij `!status` pro zjištění stavu; podle něj můžeš zadat další práci. Zprávy poslané během úplného vypnutí bota se zpětně nenačítají. Pokud Discord nedoručí odpověď, `!status` ji načte z historie Codexu. Přesně jednou doručené síťové operace nelze garantovat; bot při nejasném výsledku žádný úkol automaticky neopakuje.
 
+### Smazání vlákna
+
+Při smazání Discord vlákna bot zablokuje další zadání a schválení v této konverzaci, požádá Codex o zastavení aktivního úkolu a po potvrzení zastavení archivuje jeho historii. Teprve po úspěšné archivaci odstraní propojení s Discordem. Nemazají se vytvořené soubory ani historie Codexu; již provedené změny se nevracejí zpět.
+
+Vlákna smazaná během vypnutí bota se kontrolují při startu a opětovném připojení. Kontrola se také opakuje každých 5 minut. Archivace či automatické uzavření Discord vlákna není smazání a konverzaci zachová. Výpadek sítě nebo odebrané oprávnění se za smazání nepovažují. Pokud se úklid nepodaří, zůstane uložený jako čekající a bot jej zkusí znovu každých 10 sekund i po restartu.
+
 ## Docker a trvalá data
 
 Ve svém existujícím kontejneru můžeš pod uživatelem `node` instalovat balíček do volume:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.0
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.1
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
