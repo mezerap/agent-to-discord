@@ -1,8 +1,7 @@
-import { mkdir, realpath, open } from 'node:fs/promises';
+import { mkdir, realpath, open, rm } from 'node:fs/promises';
 import { join, relative, isAbsolute, basename } from 'node:path';
 import { constants } from 'node:fs';
-
-export const MAX_FILE_BYTES = 8 * 1024 * 1024;
+import { pipeline } from 'node:stream/promises';
 
 export function isWithin(root, path) {
   const rel = relative(root, path);
@@ -20,11 +19,8 @@ export async function readWorkspaceFile(workspace, name) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await file.stat();
-    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) throw new Error('Only regular files up to 8 MiB can be sent.');
-    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    if (bytesRead > MAX_FILE_BYTES) throw new Error('File exceeds 8 MiB.');
-    return { attachment: buffer.subarray(0, bytesRead), name: basename(path) };
+    if (!stat.isFile()) throw new Error('Only regular files can be sent.');
+    return { attachment: await file.readFile(), name: basename(path) };
   } finally { await file.close(); }
 }
 
@@ -33,7 +29,7 @@ export async function downloadAttachment(workspace, messageId, attachment) {
   if (url.protocol !== 'https:' || !['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname)) {
     throw new Error('Only Discord attachments are supported.');
   }
-  if (!/^\d+$/.test(messageId) || attachment.size > MAX_FILE_BYTES) throw new Error('Attachment exceeds 8 MiB.');
+  if (!/^\d+$/.test(messageId)) throw new Error('Invalid message ID.');
   const root = await realpath(workspace);
   const dir = join(root, 'discord-uploads', messageId);
   await mkdir(dir, { recursive: true });
@@ -42,14 +38,14 @@ export async function downloadAttachment(workspace, messageId, attachment) {
   const path = join(dir, name);
   const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Attachment download failed (${response.status}).`);
-  let bytes = 0;
-  const chunks = [];
-  for await (const chunk of response.body) {
-    bytes += chunk.length;
-    if (bytes > MAX_FILE_BYTES) throw new Error('Attachment exceeds 8 MiB.');
-    chunks.push(chunk);
-  }
-  const file = await open(path, 'wx', 0o600);
-  try { await file.writeFile(Buffer.concat(chunks)); } finally { await file.close(); }
+  let file;
+  try {
+    file = await open(path, 'wx', 0o600);
+    await pipeline(response.body, file.createWriteStream());
+  } catch (error) {
+    if (file) await rm(path, { force: true }); // Remove only the partial file created by this attempt.
+    if (response.body && !response.body.locked) await response.body.cancel().catch(() => {});
+    throw error;
+  } finally { await file?.close(); }
   return path;
 }

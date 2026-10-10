@@ -13,7 +13,7 @@ Inspired by [Agent2Telegram](https://github.com/petrludwig-collab/Agent2Telegram
 - A native typing indicator during work instead of separate “Working…” and “Done” messages.
 - Buttons to approve or reject a specific command or set of file changes, with full details in a JSON attachment. Requests are rejected after 10 minutes without a response.
 - Answers to structured questions through `/answer` or `!answer`, using plain text for one question or the provided JSON template for multiple questions.
-- Incoming files and images: up to 5 attachments of 8 MiB each, saved under `discord-uploads/` in the workspace.
+- Incoming files and images, saved under `discord-uploads/` in the workspace. The bridge imposes no attachment count or file size limit; Discord's own limits still apply to uploads and downloads.
 - Explicit downloads of output files through `/file` or `!file path`.
 - One authorized user, server, and channel. Automatic user and role mentions are disabled.
 - Persistent conversation mapping, duplicate message protection, and connection diagnostics.
@@ -34,7 +34,7 @@ Version 0.1 is intended for a personal agent. Voice, multiple users, task schedu
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.3
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.4
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -87,6 +87,8 @@ Type `/` and select a command from this bot. Commands are registered automatical
 | `/file cesta:web/index.html` | `!file web/index.html` | Send a specific file from the workspace |
 | `/answer odpoved:yes` | `!answer yes` | Answer one pending question with plain text; for multiple questions, use JSON matching the provided template |
 
+Starting with version 0.1.4, the former bridge limits of 5 attachments and 8 MiB per file are removed, including the size cap on `/file` and `!file` exports. Incoming attachments are streamed to disk. Actual transfers remain subject to Discord limits, available server resources, and network timeouts. File path and access checks are unchanged.
+
 The slash option names `cesta` (path) and `odpoved` (answer) match the bot's registered commands; enter them as shown.
 
 The typing indicator refreshes every 8 seconds. It pauses while waiting for approval or an answer and resumes after your response. Once work finishes, it stops refreshing and the agent's response remains. Discord has no separate command to turn the indicator off, so it may linger briefly, for approximately 10 seconds after the last signal at most. Errors and interrupted tasks are still reported as messages.
@@ -116,7 +118,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.3
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.4
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
