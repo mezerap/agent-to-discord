@@ -27,7 +27,8 @@ export class CodexClient extends EventEmitter {
       catch { this.fail(new Error('Invalid Codex protocol message.')); }
     });
     const result = await this.call('initialize', {
-      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.1.4' },
+      capabilities: { experimentalApi: true },
+      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.2.0' },
     });
     this.write({ method: 'initialized', params: {} });
     return result;

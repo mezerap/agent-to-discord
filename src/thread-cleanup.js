@@ -11,7 +11,7 @@ export class ThreadCleanup {
   }
 
   isDeleted(id) {
-    return this.deleted.has(id) || this.bridge.store.state.threads[id]?.deleted === true;
+    return this.deleted.has(id) || Object.values(this.bridge.store.state.threads).some(r => r.discordId === id && r.deleted);
   }
 
   hold(id) {
@@ -23,8 +23,10 @@ export class ThreadCleanup {
 
   async remove(id) {
     this.deleted.add(id); // Suppress new work and approvals immediately, even while thread/start is pending.
-    const record = this.bridge.store.state.threads[id];
-    if (record) { record.deleted = true; record.deletedAt ??= Date.now(); }
+    for (const record of Object.values(this.bridge.store.state.threads)) {
+      if (record.discordId === id) { record.deleted = true; record.deletedAt ??= Date.now(); }
+    }
+    for (const job of Object.values(this.bridge.store.state.schedules || {})) if (job.discordId === id) job.status = 'deleted';
     this.bridge.cancelPending(id);
     if (this.jobs.has(id)) return this.jobs.get(id);
 
@@ -36,11 +38,20 @@ export class ThreadCleanup {
   }
 
   async finish(id) {
-    const { store, rpc } = this.bridge;
+    const { store } = this.bridge;
     await store.save();
     await this.operations.get(id); // A turn/start already in flight must settle before cancellation.
-    const record = store.state.threads[id];
-    if (!record) return;
+    for (const [key, record] of Object.entries(store.state.threads)) {
+      if (record.discordId !== id) continue;
+      const work = () => this.archiveRecord(key, record, id);
+      if (this.bridge.archives) await this.bridge.archives.locked(record.codexId, work);
+      else await work();
+    }
+  }
+
+  async archiveRecord(key, record, id) {
+    const { store, rpc } = this.bridge;
+    if (store.state.threads[key] !== record) return;
     record.deleted = true;
     record.deletedAt ??= Date.now();
     await store.save();
@@ -65,8 +76,9 @@ export class ThreadCleanup {
     store.state.retiredThreads ??= {};
     store.state.retiredThreads[record.codexId] = {
       codexId: record.codexId, discordId: id, deletedAt: record.deletedAt,
+      ...(record.title ? { title: record.title, kind: record.kind, tools: record.tools, reason: 'deleted' } : {}),
     };
-    delete store.state.threads[id];
+    delete store.state.threads[key];
     await store.save();
     console.log('Deleted Discord thread: Codex conversation archived; workspace files preserved.');
   }

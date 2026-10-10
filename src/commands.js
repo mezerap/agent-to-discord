@@ -2,9 +2,12 @@ import { Routes } from 'discord.js';
 import { authorized } from './config.js';
 
 export const COMMANDS = [
+  { name: 'new', description: 'Začne čistou konverzaci; předchozí archivuje na 90 dní.' },
+  { name: 'archive', description: 'Soukromý přehled archivů: historie, obnovení a smazání.' },
+  { name: 'automations', description: 'Přehled a pozastavení automatizací v tomto kanálu nebo vlákně.' },
   { name: 'help', description: 'Nápověda: zadávání úkolů, vlákna, přílohy a dostupné příkazy.' },
-  { name: 'status', description: 'Zjistí stav úkolu v tomto vlákně a zobrazí poslední odpověď.' },
-  { name: 'stop', description: 'Zastaví běžící úkol v tomto vlákně.' },
+  { name: 'status', description: 'Zjistí stav úkolu v této konverzaci a zobrazí poslední odpověď.' },
+  { name: 'stop', description: 'Zastaví běžící úkol v této konverzaci.' },
   { name: 'file', description: 'Stáhne soubor z pracovního adresáře agenta.', options: [
     { type: 3, name: 'cesta', description: 'Relativní cesta ve workspace, například web/index.html', required: true },
   ] },

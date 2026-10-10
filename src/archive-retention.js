@@ -1,3 +1,4 @@
+import { forgetMessages } from './conversations.js';
 export const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const RETENTION_CHECK_MS = 60 * 60 * 1000;
 
@@ -26,7 +27,7 @@ export class ArchiveRetention {
   }
 
   async prune() {
-    const { store, rpc } = this.bridge;
+    const { store } = this.bridge;
     const cutoff = this.now() - RETENTION_MS;
     const due = Object.entries(store.state.retiredThreads || {}).filter(([id, record]) =>
       record.codexId === id && Number.isSafeInteger(record.deletedAt) && record.deletedAt > 0 && record.deletedAt <= cutoff);
@@ -36,29 +37,34 @@ export class ArchiveRetention {
     const archived = await this.archivedIds();
     for (const [id, record] of due) {
       if (this.bridge.closing) return;
-      if (Object.values(store.state.threads).some(thread => thread.codexId === id)) continue;
+      const work = () => this.pruneOne(id, record, archived);
       try {
-        if (archived.has(id)) {
-          const thread = await this.bridge.cleanup.readThread(id);
-          if (!['idle', 'notLoaded'].includes(thread.status?.type) ||
-            thread.turns?.some(turn => turn.status === 'inProgress')) continue;
-          // An external client may have restored it since the initial paginated listing.
-          if (!await this.bridge.cleanup.isArchived(id)) {
-            delete store.state.retiredThreads[id];
-            await store.save();
-            continue;
-          }
-          if (this.bridge.closing) return;
-          await rpc.call('thread/delete', { threadId: id });
-          console.log('Deleted Discord thread: archived Codex history removed after 90 days.');
-        }
-        // Restored or already deleted outside the bridge: cancel retention, never re-archive it.
-        if (store.state.retiredThreads[id] === record) delete store.state.retiredThreads[id];
-        await store.save();
+        if (this.bridge.archives) await this.bridge.archives.locked(id, work);
+        else await work();
       } catch {
-        // Includes an unknown delete outcome. Next sweep verifies the archive index before retrying.
         console.error('Could not remove an expired conversation; retention will retry.');
       }
     }
+  }
+
+  async pruneOne(id, record, archived) {
+    const { store, rpc } = this.bridge;
+    if (this.bridge.closing || store.state.retiredThreads[id] !== record || record.restoreTarget || record.restoreCreating ||
+      Object.values(store.state.threads).some(thread => thread.codexId === id)) return;
+    if (archived.has(id)) {
+      const thread = await this.bridge.cleanup.readThread(id);
+      if (!['idle', 'notLoaded'].includes(thread.status?.type) || thread.turns?.some(turn => turn.status === 'inProgress')) return;
+      if (!await this.bridge.cleanup.isArchived(id)) {
+        delete store.state.retiredThreads[id];
+        await store.save();
+        return;
+      }
+      if (this.bridge.closing) return;
+      await rpc.call('thread/delete', { threadId: id });
+      console.log('Archived Codex history removed after 90 days.');
+    }
+    if (store.state.retiredThreads[id] === record) delete store.state.retiredThreads[id];
+    forgetMessages(store.state, id);
+    await store.save();
   }
 }

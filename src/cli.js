@@ -93,7 +93,7 @@ async function run() {
 
     await store.open();
     await registerCommands(discord, config.guildId);
-    console.log('Discord slash commands registered: /help, /status, /stop, /file, /answer.');
+    console.log('Discord slash commands registered: /help, /new, /archive, /automations, /status, /stop, /file, /answer.');
     bridge = new Bridge(config, discord, rpc, store);
     bridge.attach();
     await bridge.recover();
@@ -113,5 +113,6 @@ else if (command === 'status') {
   const config = configFromEnv(process.env, { tokenRequired: false });
   const state = JSON.parse(await readFile(resolve(config.stateDir, 'state.json'), 'utf8'));
   console.log(JSON.stringify({ conversations: Object.keys(state.threads).length, activeAtLastSave: Object.values(state.threads).filter(t => t.active).length,
-    archivedAwaitingDeletion: Object.keys(state.retiredThreads || {}).length, archiveRetentionDays: 90 }, null, 2));
+    archivedAwaitingDeletion: Object.keys(state.retiredThreads || {}).length, archiveRetentionDays: 90, automations: Object.keys(state.schedules || {}).length,
+    enabledAutomations: Object.values(state.schedules || {}).filter(j => j.status === 'enabled').length }, null, 2));
 } else console.log('agent-to-discord <setup|start|doctor|status> [--env-file /absolute/path/to/.env]');

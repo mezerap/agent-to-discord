@@ -14,7 +14,7 @@ test('guild commands are registered without deleting unrelated commands or updat
     patch: async () => assert.fail('No update required'),
   } };
   await registerCommands(discord, 'guild');
-  assert.deepEqual(writes.map(w => w.name), ['stop', 'file', 'answer']);
+  assert.deepEqual(writes.map(w => w.name), COMMANDS.slice(2).map(c => c.name));
   assert.ok(writes.every(w => w.route.includes('/guilds/guild/commands')));
 });
 

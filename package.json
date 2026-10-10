@@ -1,7 +1,7 @@
 {
   "name": "agent-to-discord",
-  "version": "0.1.4",
-  "description": "Talk to your self-hosted Codex agent through Discord threads.",
+  "version": "0.2.0",
+  "description": "Talk to your self-hosted Codex agent through Discord channels, threads and scheduled tasks.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mezerap/agent-to-discord.git"
@@ -29,6 +29,7 @@
     "doctor": "node src/cli.js doctor"
   },
   "dependencies": {
+    "cron-parser": "5.10.2",
     "discord.js": "14.27.0"
   },
   "license": "MIT"

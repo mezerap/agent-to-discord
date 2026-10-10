@@ -1,3 +1,4 @@
+import { initializeState } from './conversations.js';
 import { mkdir, readFile, writeFile, rename, open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -31,6 +32,7 @@ export class Store {
       if (this.state.version !== 1 || !this.state.threads || !Array.isArray(this.state.seen)) throw new Error('Invalid bridge state.');
       this.state.retiredThreads ??= {};
       if (typeof this.state.retiredThreads !== 'object' || Array.isArray(this.state.retiredThreads)) throw new Error('Invalid retention state.');
+      initializeState(this.state);
     } catch (error) { if (error.code !== 'ENOENT') { await this.close(); throw error; } }
   }
 
