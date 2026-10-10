@@ -7,7 +7,9 @@ export function initializeState(state) {
   state.freshChannels ??= {};
   state.queuedMessages ??= {};
   state.queuePaused ??= {};
-  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused']) {
+  state.contextSeeds ??= {};
+  state.contextPlans ??= {};
+  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans']) {
     if (!state[key] || typeof state[key] !== 'object' || Array.isArray(state[key])) throw new Error(`Invalid ${key} state.`);
   }
 }
@@ -52,7 +54,7 @@ export async function referencedMessage(bridge, message) {
 export async function createConversation(bridge, channel, text) {
   let source;
   let quote;
-  if (channel.isThread?.() && !bridge.store.state.freshChannels[channel.id]) {
+  if (channel.isThread?.() && !bridge.store.state.freshChannels[channel.id] && !bridge.store.state.contextSeeds[channel.id]) {
     const ref = bridge.store.state.messages[channel.id];
     source = ref && bridge.record(ref.codexId) && !bridge.store.state.retiredThreads[ref.codexId] ? ref : null;
     const parent = await bridge.discord.channels.fetch(bridge.config.channelId);
@@ -110,7 +112,7 @@ export class ConversationArchives {
       try { await this.bridge.rpc.call('thread/archive', { threadId: record.codexId }); }
       catch (error) { if (!await this.bridge.cleanup.isArchived(record.codexId)) throw error; }
       store.state.retiredThreads[record.codexId] = { codexId: record.codexId, discordId: record.discordId,
-        deletedAt: ['new', 'idle'].includes(reason) ? Date.now() : record.deletedAt, title: record.title || 'Konverzace', kind: record.kind || 'thread', reason, tools: record.tools };
+        deletedAt: ['new', 'idle', 'handoff'].includes(reason) ? Date.now() : record.deletedAt, title: record.title || 'Konverzace', kind: record.kind || 'thread', reason, tools: record.tools };
       delete store.state.threads[key];
       await store.save();
     });

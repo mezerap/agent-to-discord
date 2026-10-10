@@ -49,7 +49,7 @@ export class ArchiveRetention {
 
   async pruneOne(id, record, archived) {
     const { store, rpc } = this.bridge;
-    if (this.bridge.closing || store.state.retiredThreads[id] !== record || record.restoreTarget || record.restoreCreating ||
+    if (this.bridge.closing || store.state.contextPlans?.[id] || store.state.retiredThreads[id] !== record || record.restoreTarget || record.restoreCreating ||
       Object.values(store.state.threads).some(thread => thread.codexId === id)) return;
     if (archived.has(id)) {
       const thread = await this.bridge.cleanup.readThread(id);

@@ -1,46 +1,45 @@
-import { recordsAt } from './conversations.js';
 import { say } from './messages.js';
 
 export const MAIN_IDLE_MS = 24 * 60 * 60 * 1000;
+export const CONTEXT_WARNING_TOKENS = 30_000;
 
 export class IdleContext {
   constructor(bridge, now = Date.now) {
-    this.bridge = bridge;
-    this.now = now;
-    this.resetting = false;
-    // Older releases did not track activity. Give existing chats a full day
-    // from migration instead of guessing their age and archiving immediately.
+    this.bridge = bridge; this.now = now;
     const main = bridge.store.state.threads[bridge.config.channelId];
     if (main && !Number.isFinite(main.lastActivityAt)) main.lastActivityAt = now();
   }
+  touch(record) { if (record?.kind === 'main') record.lastActivityAt = this.now(); }
 
-  touch(record) {
-    if (record?.kind === 'main') record.lastActivityAt = this.now();
+  async beforeMessage(channel, record) {
+    if (record?.kind === 'main' && this.now() - record.lastActivityAt >= MAIN_IDLE_MS &&
+      this.now() - (record.idleWarningAt || 0) >= MAIN_IDLE_MS) {
+      record.idleWarningAt = this.now(); await this.bridge.store.save();
+      await say(channel, 'Od poslední aktivity uběhlo 24 hodin. Pokračuji ve stejném kontextu. Pro nový použij /new, nebo mi napiš, která témata chceš zachovat či přesunout do vlákna. Bez potvrzení nic nearchivuji.').catch(() => { console.error('Inactivity notice unavailable; conversation preserved.'); });
+    }
+    return record;
   }
 
-  // The caller holds the channel busy/cleanup lock. Queued work never enters
-  // here; it finishes in its captured context and refreshes the activity time.
-  async beforeMessage(channel, record) {
-    const b = this.bridge;
-    if (channel.id !== b.config.channelId || !record || record.kind !== 'main' ||
-      !Number.isFinite(record.lastActivityAt) || this.now() - record.lastActivityAt < MAIN_IDLE_MS ||
-      b.queue.has(channel.id) || recordsAt(b, channel.id).some(r => r.active || r.uncertain || r.retiring)) return record;
+  async update(record, usage) {
+    const input = usage?.last?.inputTokens;
+    if (!Number.isFinite(input) || input < 0) return;
+    record.contextUsage = { inputTokens: input, modelContextWindow: usage.modelContextWindow ?? null,
+      totalTokens: usage.total?.totalTokens ?? null, at: this.now() };
+    await this.bridge.store.save();
+  }
 
-    this.resetting = true;
-    try {
-      for (const job of Object.values(b.store.state.schedules)) {
-        if (job.sourceId !== record.codexId || !job.contextPending || job.status === 'deleted') continue;
-        await b.scheduler.prepare(job);
-        if (job.contextPending) return record;
-      }
-      if (b.closing || b.cleanup.isDeleted(channel.id)) throw new Error('Channel unavailable during idle reset.');
-      await b.archives.retire(channel.id, 'idle');
-      b.store.state.freshChannels[channel.id] = true;
-      await b.store.save();
-      await say(channel, 'Po 24 hodinách neaktivity začínám nový kontext. Předchozí konverzace je v /archive a po 90 dnech se smaže. Soubory a automatizace zůstávají.').catch(() => {
-        console.error('Idle-context reset notice could not be delivered.');
-      });
-      return undefined;
-    } finally { this.resetting = false; }
+  async warn(record) {
+    if (record.kind !== 'main' || (record.contextUsage?.inputTokens || 0) < CONTEXT_WARNING_TOKENS) return;
+    if (record.contextWarningAt && this.now() - record.contextWarningAt < MAIN_IDLE_MS) return;
+    record.contextWarningAt = this.now(); await this.bridge.store.save();
+    const channel = await this.bridge.discord.channels.fetch(record.discordId);
+    await say(channel, `Kontext posledního vstupu má přibližně ${record.contextUsage.inputTokens.toLocaleString('cs-CZ')} tokenů (hranice upozornění 30 000). Zatím pokračuji ve stejném chatu. Můžeš napsat „archivuj, ale zachovej témata X a Y“ nebo požádat o přenos do vlákna. Návrh nejprve ukážu k potvrzení. /new začne čistě bez zachování témat.`);
+  }
+
+  status(record) {
+    const u = record?.contextUsage;
+    if (!u) return 'Velikost kontextu: Codex ji zatím neohlásil.';
+    const percent = u.modelContextWindow > 0 ? ` (~${Math.round(u.inputTokens / u.modelContextWindow * 100)} % kapacity)` : '';
+    return `Poslední vstup: ${u.inputTokens.toLocaleString('cs-CZ')} tokenů${percent}. Hranice upozornění: 30 000. Součet spotřeby: ${u.totalTokens ?? 'neznámý'} tokenů. Údaj zahrnuje historii, instrukce a nástroje; nejde o velikost příštího požadavku.`;
   }
 }

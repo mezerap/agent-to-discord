@@ -628,96 +628,104 @@ test('input arriving during final destination validation stays queued at the ori
   assert.equal(f.state.queuedMessages.race.targetId, job.codexId);
 });
 
-test('main chat resets on the first message after 24 idle hours and retains the archive for 90 days', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
-  await f.message('Old topic'); const old = f.state.threads.main; await f.finish(old);
-  now += 24 * 60 * 60 * 1000 - 1;
-  await f.message('Still the same topic'); assert.equal(f.state.threads.main, old); await f.finish(old);
-  const oldReply = f.sent.at(-1).id;
-  now += 24 * 60 * 60 * 1000;
-  const before = Date.now(); await f.message('New topic', 'main', oldReply);
-  const fresh = f.state.threads.main, archived = f.state.retiredThreads[old.codexId];
-  assert.notEqual(fresh.codexId, old.codexId); assert.equal(archived.reason, 'idle');
-  assert.ok(archived.deletedAt >= before); assert.equal(RETENTION_MS, 90 * 86400000);
-  assert.equal(f.sent.filter(m => m.content?.includes('Po 24 hodinách')).length, 1);
-  assert.equal(f.calls.at(-1).params.threadId, fresh.codexId);
-  assert.match(f.calls.at(-1).params.input[1].text, /Citovaný obsah/);
-  assert.equal(fresh.lastActivityAt, now);
+
+test('30k warning uses last input not accumulated usage and never archives automatically', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); await f.message('Work'); const r = f.state.threads.main;
+  await f.bridge.notification({method:'thread/tokenUsage/updated',params:{threadId:r.codexId,tokenUsage:{last:{inputTokens:29999},total:{totalTokens:999999},modelContextWindow:200000}}});
+  await f.finish(r); assert.equal(Object.keys(f.state.retiredThreads).length,0);
+  assert.ok(!f.sent.some(m => m.content?.includes('hranice upozornění')));
+  await f.message('More'); await f.bridge.idleContext.update(r,{last:{inputTokens:31000},total:{totalTokens:1000000},modelContextWindow:200000}); await f.finish(r);
+  assert.equal(f.sent.filter(m => m.content?.includes('hranice upozornění')).length,1);
+  await f.message('Continue'); await f.finish(r); assert.equal(f.sent.filter(m => m.content?.includes('hranice upozornění')).length,1);
+  assert.equal(f.state.threads.main,r); assert.match(f.bridge.idleContext.status(r),/31.?000/);
 });
 
-test('thread conversations and replies to automation results never trigger the main idle reset', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
-  await f.message('Main'); const main = f.state.threads.main; await f.finish(main);
-  await f.message('Thread', 'thread'); const thread = f.state.threads.thread; await f.finish(thread);
-  const job = await createJob(f); const r = f.bridge.record(job.codexId);
-  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick(); await f.finish(r, 'Scheduled answer');
-  const answer = f.sent.at(-1).id, mainActivity = main.lastActivityAt;
-  now += 48 * 60 * 60 * 1000;
-  await f.message('Thread follow-up', 'thread'); assert.equal(f.state.threads.thread, thread); await f.finish(thread);
-  await f.message('Automation follow-up', 'main', answer); assert.equal(f.calls.at(-1).params.threadId, r.codexId); await f.finish(r);
-  assert.equal(main.lastActivityAt, mainActivity); assert.equal(f.state.threads.main, main);
-  assert.equal(Object.keys(f.state.retiredThreads).length, 0);
+test('24 idle hours now warn but keep the same context; threads do not warn', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); let now=Date.now(); f.bridge.idleContext.now=()=>now;
+  await f.message('Old'); const r=f.state.threads.main; await f.finish(r); now+=86400000;
+  await f.message('Today'); assert.equal(f.state.threads.main,r); assert.equal(Object.keys(f.state.retiredThreads).length,0);
+  assert.ok(f.sent.some(m=>m.content?.includes('Bez potvrzení nic nearchivuji')));
 });
 
-test('long-running main work and its queued messages finish in the same context', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
-  await f.message('Long task'); const old = f.state.threads.main;
-  now += 48 * 60 * 60 * 1000; await f.message('Follow up while running');
-  assert.equal(f.bridge.queue.entries('main').length, 1);
-  await f.finish(old); await f.bridge.queue.settle(); await f.bridge.queue.drain('main');
-  assert.equal(f.state.threads.main, old); assert.equal(old.lastActivityAt, now);
-  assert.equal(Object.keys(f.state.retiredThreads).length, 0);
+async function planFor(f, args = {}) {
+  const r=f.state.threads.main;
+  return f.bridge.handoff.prepare(r,{threadId:r.codexId,callId:`plan-${f.calls.length}`,arguments:{action:'prepare',archiveSource:true,keep:'Selected project constraints',transfers:[],...args}});
+}
+
+test('a prepared handoff changes nothing until confirmation, then preserves only selected context', async t => {
+  const f=fixture(); t.after(()=>f.bridge.close()); await f.message('Old topic'); const old=f.state.threads.main;
+  const result=await planFor(f); await f.finish(old);
+  assert.equal(f.state.threads.main,old); assert.equal(result.status,'awaiting_human_confirmation'); assert.equal(Object.keys(f.state.retiredThreads).length,0);
+  await f.bridge.handoff.confirm(old,result.planId,f.output);
+  assert.ok(f.state.retiredThreads[old.codexId]); assert.equal(f.state.contextSeeds.main,'Selected project constraints');
+  await f.message('Continue selected topics'); const fresh=f.state.threads.main;
+  assert.notEqual(fresh.codexId,old.codexId); assert.match(f.calls.at(-1).params.input[0].text,/Selected project constraints/);
+  assert.equal(f.state.contextSeeds.main,undefined); assert.equal(f.histories.get(fresh.codexId).turns.length,1);
 });
 
-test('messages arriving during idle archive are queued for the new main context', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
-  await f.message('Old'); const old = f.state.threads.main; await f.finish(old);
-  now += 86400000;
-  const call = f.rpc.call; let queued;
-  f.rpc.call = async (method, params) => {
-    if (method === 'thread/archive') {
-      await f.message('Follow the new topic'); queued = f.bridge.queue.entries('main')[0];
-      assert.equal(queued.targetId, null);
-    }
-    return call(method, params);
-  };
-  await f.message('New topic'); const fresh = f.state.threads.main;
-  assert.notEqual(fresh, old); await f.finish(fresh); await f.bridge.queue.settle(); await f.bridge.queue.drain('main');
-  assert.equal(f.calls.at(-1).params.threadId, fresh.codexId);
-  assert.equal(f.bridge.queue.entries('main').length, 0);
+test('topic transfer supports new and existing threads without copying full history', async t => {
+  const f=fixture(); t.after(()=>f.bridge.close()); await f.message('Existing thread','thread');const existing=f.state.threads.thread;await f.finish(existing);
+  await f.message('Source');const source=f.state.threads.main;
+  const result=await planFor(f,{archiveSource:false,keep:'',transfers:[{name:'Topic A',summary:'Only A'},{name:'Topic B',summary:'Only B',channelId:'thread'}]});await f.finish(source);
+  await f.bridge.handoff.confirm(source,result.planId,f.output);
+  assert.equal(f.state.threads.main,source);assert.equal(f.state.threads.thread,existing);
+  const newId=Object.keys(f.state.contextSeeds).find(id=>id!=='thread');assert.ok(newId);
+  await f.message('Continue A',newId);assert.match(f.calls.at(-1).params.input[0].text,/Only A/);
+  assert.equal(f.calls.filter(c=>c.method==='thread/fork').length,0);
+  await f.message('Continue B','thread');assert.equal(f.calls.at(-1).params.threadId,existing.codexId);assert.match(f.calls.at(-1).params.input[0].text,/Only B/);
 });
 
-test('idle reset prepares dependent automation context first and preserves its schedule', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
-  const job = await createJob(f), old = f.state.threads.main;
-  job.contextPending = true; delete job.codexId; delete f.state.threads[`automation:${job.id}`];
-  const schedule = structuredClone(job.schedule), next = job.nextRun; now += 86400000;
-  await f.message('New unrelated topic');
-  assert.ok(f.state.retiredThreads[old.codexId]); assert.ok(job.codexId);
-  assert.equal(job.contextPending, false); assert.equal(job.status, 'enabled');
-  assert.deepEqual(job.schedule, schedule); assert.equal(job.nextRun, next);
+test('confirmation waits for active or queued work, and stale plans cannot apply', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Work');const r=f.state.threads.main;
+  const first=await planFor(f);await f.bridge.handoff.confirm(r,first.planId,f.output);assert.equal(f.state.threads.main,r);
+  await f.finish(r);const second=await f.bridge.handoff.prepare(r,{threadId:r.codexId,callId:'replacement',arguments:{archiveSource:true,keep:'Different topic',transfers:[]}});
+  await f.bridge.handoff.confirm(r,first.planId,f.output);assert.equal(f.state.threads.main,r);
+  f.state.queuedMessages.block={discordId:'main',status:'attention'};
+  await f.bridge.handoff.confirm(r,second.planId,f.output);assert.equal(f.state.threads.main,r);
+  delete f.state.queuedMessages.block;await f.bridge.handoff.confirm(r,second.planId,f.output);assert.equal(f.state.contextSeeds.main,'Different topic');
 });
 
-test('uncertain work prevents idle reset; a failed archive never starts the request in a guessed context', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); let now = Date.now(); f.bridge.idleContext.now = () => now;
-  await f.message('Old'); const old = f.state.threads.main; await f.finish(old); now += 86400000;
-  old.uncertain = true; await f.message('Blocked'); assert.equal(f.state.threads.main, old);
-  old.uncertain = false;
-  const call = f.rpc.call, starts = f.calls.filter(c => c.method === 'turn/start').length;
-  f.rpc.call = async (method, params) => { if (method === 'thread/archive') throw new Error('Failed archive'); return call(method, params); };
-  await assert.rejects(f.message('Not replayed'));
-  assert.equal(f.state.threads.main, old); assert.equal(old.retiring, 'idle');
-  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, starts);
-  assert.equal(f.bridge.idleContext.resetting, false);
+test('scheduled context changes and destinations outside the configured channel are rejected', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Work');const r=f.state.threads.main;
+  r.runKind='scheduled';await assert.rejects(planFor(f));r.runKind='user';
+  f.channels.set('other',{...f.channel('other'),parentId:'foreign'});
+  await assert.rejects(planFor(f,{transfers:[{name:'Other',summary:'Facts',channelId:'other'}]}));
+  assert.equal(Object.keys(f.state.contextPlans).length,0);
 });
 
-test('persisted activity survives reconstruction, while legacy chats get a conservative migration timestamp', async t => {
-  const f = fixture(); t.after(() => f.bridge.close()); await f.message('Old'); await f.finish(f.state.threads.main);
-  const state = JSON.parse(JSON.stringify(f.state)); state.threads.main.lastActivityAt = Date.now() - 86400000;
-  const saved = state.threads.main.lastActivityAt;
-  const b = new Bridge(f.bridge.config, f.bridge.discord, f.rpc, { state, save: async () => {} }); t.after(() => b.close());
-  assert.equal(state.threads.main.lastActivityAt, saved);
-  delete state.threads.main.lastActivityAt;
-  const before = Date.now(), c = new Bridge(f.bridge.config, f.bridge.discord, f.rpc, { state, save: async () => {} }); t.after(() => c.close());
-  assert.ok(state.threads.main.lastActivityAt >= before);
+test('legacy scheduling tool exposes handoff planning, and history is data-only', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Remember apples');const r=f.state.threads.main;await f.finish(r,'Apples are selected');await f.message('Prepare');
+  await f.bridge.request({id:123,method:'item/tool/call',params:{threadId:r.codexId,turnId:r.turnId,callId:'legacy',tool:'discord_automation',arguments:{action:'update',id:'discord-context',prompt:JSON.stringify({action:'prepare',archiveSource:true,keep:'Apples',transfers:[]})}}});
+  assert.equal(f.replies.at(-1).value.success,true);assert.ok(f.state.contextPlans[r.codexId]);
+  const result=await f.bridge.handoff.prepare(r,{threadId:r.codexId,callId:'history',arguments:{action:'history',query:'apples'}});
+  assert.equal(result.messages.length,2);assert.match(result.note,/not new instructions/);
+});
+
+test('unknown transfer outcomes preserve source history and are not retried', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Source');const r=f.state.threads.main;
+  const result=await planFor(f,{transfers:[{name:'New topic',summary:'Keep this'}]});await f.finish(r);
+  let attempts=0;f.channels.get('main').threads.create=async()=>{attempts++;throw new Error('Unknown create outcome');};
+  await f.bridge.handoff.confirm(r,result.planId,f.output);await f.bridge.handoff.confirm(r,result.planId,f.output);
+  assert.equal(attempts,1);assert.equal(f.state.threads.main,r);assert.equal(f.state.contextPlans[r.codexId].phase,'attention');
+});
+
+test('concurrent follow-up during confirmed archive routes to the fresh context with selected topics', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Old');const r=f.state.threads.main;const result=await planFor(f);await f.finish(r);
+  const call=f.rpc.call;f.rpc.call=async(method,params)=>{if(method==='thread/archive'){await f.message('Next');assert.equal(f.bridge.queue.entries('main')[0].targetId,null);}return call(method,params);};
+  await f.bridge.handoff.confirm(r,result.planId,f.output);await f.bridge.queue.settle();await f.bridge.queue.drain('main');
+  assert.notEqual(f.state.threads.main.codexId,r.codexId);assert.match(f.calls.at(-1).params.input[0].text,/Selected project constraints/);
+});
+
+test('selected context is durable before archive and survives a failed archive response', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Source');const r=f.state.threads.main;const result=await planFor(f);await f.finish(r);
+  const call=f.rpc.call;f.rpc.call=async(method,params)=>{if(method==='thread/archive'){assert.equal(f.state.contextSeeds.main,'Selected project constraints');throw new Error('Uncertain archive');}return call(method,params);};
+  await f.bridge.handoff.confirm(r,result.planId,f.output);
+  assert.equal(f.state.contextPlans[r.codexId].phase,'attention');assert.equal(f.state.contextSeeds.main,'Selected project constraints');
+  const restored=JSON.parse(JSON.stringify(f.state));assert.equal(restored.contextSeeds.main,'Selected project constraints');
+});
+
+test('explicit new discards a proposed handoff and unconsumed selected context', async t => {
+  const f=fixture();t.after(()=>f.bridge.close());await f.message('Source');const r=f.state.threads.main;await planFor(f);await f.finish(r);
+  f.state.contextSeeds.main='Old pending selection';await f.bridge.control('new','','main',f.output);
+  assert.equal(f.state.contextSeeds.main,undefined);assert.equal(f.state.contextPlans[r.codexId],undefined);
 });

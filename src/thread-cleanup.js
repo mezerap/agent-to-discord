@@ -32,6 +32,10 @@ export class ThreadCleanup {
       delete job.destinationError;
     }
     this.bridge.queue?.drop(id);
+    delete this.bridge.store.state.contextSeeds?.[id];
+    for (const [key, plan] of Object.entries(this.bridge.store.state.contextPlans || {})) {
+      if (plan.sourceChannel === id && plan.phase === 'proposed') delete this.bridge.store.state.contextPlans[key];
+    }
     this.bridge.cancelPending(id);
     if (this.jobs.has(id)) return this.jobs.get(id);
 

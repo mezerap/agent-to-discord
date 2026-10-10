@@ -73,6 +73,8 @@ export class ConversationUI {
     if (b.queue.has(channelId)) return say(output, 'Nejprve vyřiď nebo odeber zprávy z /queue. /new čekající zprávy nepřesouvá do nové konverzace.');
     if (b.busy.has(channelId) || record?.active) return say(output, 'Nejprve zastav běžící úkol přes /stop nebo počkej na dokončení.');
     if (record?.uncertain) return say(output, 'Nejprve ověř předchozí úkol přes /status.');
+    const plan = record && b.store.state.contextPlans[record.codexId];
+    if (plan && plan.phase !== 'proposed') return say(output, 'Nejprve ověř rozpracovaný přenos kontextu přes /status.');
     b.busy.add(channelId);
     const release = b.cleanup.hold(channelId);
     try {
@@ -84,6 +86,8 @@ export class ConversationUI {
         }
         await b.archives.retire(channelId, 'new');
       }
+      if (record) delete b.store.state.contextPlans[record.codexId];
+      delete b.store.state.contextSeeds[channelId];
       b.store.state.freshChannels[channelId] = true;
       await b.store.save();
       await say(output, 'Další zpráva začne čistou konverzaci. Předchozí historie je v /archive a po 90 dnech se smaže. Zprávy, soubory, ostatní konverzace a automatizace zůstávají.');

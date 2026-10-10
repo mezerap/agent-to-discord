@@ -48,7 +48,8 @@ export class MessageQueue {
       const target = quoted?.ref && b.record(quoted.ref.codexId);
       const record = target?.kind === 'automation' && target.discordId === channelId && !target.deleted && !target.retiring
         ? target : b.store.state.threads[channelId];
-      entry.targetId = b.idleContext.resetting && record?.kind === 'main' ? null : record?.codexId || null;
+      const plan = record && b.store.state.contextPlans[record.codexId];
+      entry.targetId = plan?.phase === 'applying' && plan.archiveSource ? null : record?.codexId || null;
       entry.input = await b.messageInput(message, quoted);
       if (b.cleanup.isDeleted(channelId) || !b.store.state.queuedMessages[entry.id]) return;
       entry.status = 'queued';

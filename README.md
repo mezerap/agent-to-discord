@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.3.2
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.4.0
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -82,9 +82,15 @@ Send a message such as “Create a simple HTML page” in the authorized channel
 
 Discord **Reply** quotes the selected message. In ordinary chats it stays in the current conversation; a reply to an automation’s mapped output routes to that automation instead. References cannot route to another Discord destination. Replies to old messages after `/new` quote text without resuming archived history. Messages predating this version have no stored turn mapping and are quoted as text. Conversation histories are separate; workspace files are shared.
 
-The **main chat automatically starts a fresh context after 24 hours of inactivity**, when the next ordinary message arrives. Activity is measured from the latest task submission, accepted in-task follow-up or turn completion in that conversation and is persisted across restarts. The bot posts a short notice, archives the old conversation for 90 days and processes your new message in a fresh one. Replies to old ordinary messages retain only the quoted text. Commands such as `/status` do not extend the interval. No model runs just to check inactivity.
+The main chat **warns instead of automatically archiving** when the latest reported model input reaches 30,000 tokens, or the next message arrives after 24 idle hours. You can continue normally. Token warnings are limited to once per day per conversation; inactivity notices are also limited to once per day. `/status` shows the latest input, approximate context-window percentage (when reported), and cumulative usage separately. Input includes instructions, history and tool results; cumulative usage is not the current context size. The report describes the last model call, not the next call. Monitoring does not make extra model calls. Threads and automation conversations show usage but do not get main-chat warnings. This replaces the automatic idle reset introduced in 0.3.2.
 
-Threads and automation conversations never reset this way. Replies to automation results keep their own context. Active, uncertain or queued work takes precedence: queued follow-ups finish in their captured context and refresh its activity time. Any pending automation context is forked before its source can be archived. Messages arriving during a reset queue for the fresh main chat. Existing chats without an activity timestamp get a full 24-hour grace period when this release first loads them. `/new` remains available for an immediate manual reset; project files and schedules are preserved.
+Ask naturally: “Archive this, but keep topics X and Y”, “Move topic X to a new thread”, or “Copy this topic into thread <ID>”. The agent prepares selected factual summaries and destinations using `discord_context`. It can search the current conversation's user/agent history for earlier topics. Missing or ambiguous details should be clarified, not invented. A summary is a selective, potentially lossy handoff rather than a full-history fork; review decisions, paths and unresolved tasks carefully.
+
+After the reply, the bot displays a plan with a text attachment and **Confirm transfer / Cancel** buttons (in Czech). Nothing is archived, copied or created until you click confirmation. To revise a plan, explain the changes to the agent; a replacement invalidates old buttons. Expired buttons can be reopened with `/status`. Confirmation waits until the source destination has no active, uncertain or queued work. It preserves any pending automation context first. Selected topics can be kept for the next conversation here, copied to new threads, or added as context for the next message in existing threads under the configured main channel. Existing target history is preserved. Bot messages alone never start a task in a target thread. An ordinary new Discord thread created from a message still uses the original full-history fork behavior; use the handoff plan for selected topics only.
+
+Selected summaries are persisted before source archiving and injected as reference data into the destination's next ordinary user turn. Only the selected summaries carry forward, not the whole source history. Confirmation can either archive the source for 90 days or leave it open and only copy topics. Project files and schedules are preserved. `/new` remains an explicit request to archive and start completely clean, discarding any unconsumed summary and unconfirmed plan at that destination. Discord messages themselves remain.
+
+The new tool is included in fresh conversations; existing conversations with `discord_automation` can use a compatibility operation described in the bridge's instructions, without `/new`. Scheduled invocations cannot prepare transfers. Transfer operations are journaled before external changes; after a crash or ambiguous Discord/Codex response, the bot does not blindly create duplicate threads or resend summaries. `/status` reports the partial transfer for operator inspection, and its source archive is excluded from automatic retention until resolved.
 
 Type `/` and select a command from this bot. Commands are registered automatically for the configured Discord server at startup. Their results are visible only to you, including files requested through `/file`. The original `!` commands still work and reply publicly in the channel. Submit tasks as ordinary messages. Commands enforce the same user, server, and channel restrictions as messages.
 
@@ -165,7 +171,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.3.2
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.4.0
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
