@@ -1,35 +1,35 @@
 # Agent to Discord
 
-Ovládej svého Codex agenta přes Discord. Malý samostatný most v Node.js: zpráva založí Discord vlákno, které si pamatuje svou Codex konverzaci i po restartu.
+Control your Codex agent through Discord. A small, standalone Node.js bridge: each new request creates a Discord thread that remembers its Codex conversation, even after a restart.
 
-Inspirováno projektem [Agent2Telegram](https://github.com/petrludwig-collab/Agent2Telegram). Jde o samostatnou implementaci pro Discord využívající [Codex app-server](https://developers.openai.com/codex/app-server/), bez tmux a bez parsování obrazovky terminálu.
+Inspired by [Agent2Telegram](https://github.com/petrludwig-collab/Agent2Telegram). This is an independent implementation for Discord using the [Codex app-server](https://developers.openai.com/codex/app-server/), without tmux or terminal screen parsing.
 
-## Co umí
+## Features
 
-- Nové zadání v určeném kanálu → nové Discord vlákno a Codex konverzace.
-- Další zprávy ve vlákně pokračují ve stejné konverzaci.
-- Zprávy agenta a konečný stav, dlouhé odpovědi rozdělené podle limitu Discordu.
-- Schválení nebo odmítnutí konkrétního příkazu/změny souborů přes tlačítka; úplné podrobnosti v JSON příloze. Po 10 minutách bez odpovědi se požadavek odmítne.
-- Odpovědi na strukturované otázky přes `!answer` podle zaslané šablony.
-- Příchozí soubory a obrázky, nejvýše 5 příloh po 8 MiB; uložení pod `discord-uploads/` v pracovním adresáři.
-- Výslovné stažení výsledného souboru příkazem `!file cesta`.
-- Jeden povolený uživatel, server a kanál. Automatické zmínky uživatelů/rolí jsou vypnuté.
-- Trvalé mapování konverzací, ochrana proti opakovanému zpracování zpráv a diagnostika připojení.
-- Smazání Discord vlákna přeruší běžící úkol, odmítne čekající schválení a archivuje konverzaci Codexu. Soubory v pracovním adresáři zůstanou zachované.
+- A new request in the designated channel creates a new Discord thread and Codex conversation.
+- Follow-up messages in the thread continue the same conversation.
+- Agent messages and final status, with long responses split to fit Discord's message limit.
+- Buttons to approve or reject a specific command or set of file changes, with full details in a JSON attachment. Requests are rejected after 10 minutes without a response.
+- Answers to structured questions through `!answer`, using the provided template.
+- Incoming files and images: up to 5 attachments of 8 MiB each, saved under `discord-uploads/` in the workspace.
+- Explicit downloads of output files through `!file path`.
+- One authorized user, server, and channel. Automatic user and role mentions are disabled.
+- Persistent conversation mapping, duplicate message protection, and connection diagnostics.
+- Deleting a Discord thread interrupts the running task, rejects pending approvals, and archives the Codex conversation. Files in the workspace are preserved.
 
-Verze 0.1 je určena pro osobního agenta. Hlas, více uživatelů, plánování úkolů a připojení k libovolnému existujícímu terminálu nejsou implementované. Během běžícího úkolu bot další zadání odmítne; neudržuje frontu. Obecné žádosti o rozšíření oprávnění a MCP formuláře nepovoluje. Pokud nelze zobrazit příkaz nebo změny souborů, tlačítko schválení zůstane vypnuté.
+Version 0.1 is intended for a personal agent. Voice, multiple users, task scheduling, and connections to arbitrary existing terminals are not implemented. While a task is running, the bot rejects new requests; it does not maintain a queue. It does not allow general permission expansion requests or MCP forms. If the command or file changes cannot be displayed, the approval button remains disabled.
 
-## Požadavky
+## Requirements
 
-- Node.js 22.12+ a `ps` (na Debianu balíček `procps`).
-- Nainstalovaný a přihlášený Codex CLI. Integrace ověřována s verzí **0.162.1**; rozhraní app-server se může mezi verzemi měnit.
-- Discord bot s povoleným **Message Content Intent** v Developer Portal → Bot.
-- Bot přidaný na server s oprávněními **View Channel, Send Messages, Create Public Threads, Send Messages in Threads, Read Message History, Attach Files** v určeném textovém kanálu. Administrator není potřeba.
-- Odchozí HTTPS/WebSocket připojení ke službám Discord a OpenAI. Žádný příchozí port nebo veřejný webhook.
+- Node.js 22.12+ and `ps` (the `procps` package on Debian).
+- Codex CLI installed and signed in. The integration has been verified with version **0.162.1**; the app-server interface may change between versions.
+- A Discord bot with **Message Content Intent** enabled under Developer Portal → Bot.
+- The bot added to your server with **View Channel, Send Messages, Create Public Threads, Send Messages in Threads, Read Message History, Attach Files** permissions in the designated text channel. Administrator permission is not required.
+- Outbound HTTPS/WebSocket connections to Discord and OpenAI. No inbound port or public webhook is needed.
 
-## Instalace
+## Installation
 
-Balíček lze nainstalovat přímo z GitHubu, bez publikace do npm registru:
+The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
 npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.1
@@ -38,9 +38,9 @@ agent-to-discord doctor
 agent-to-discord start
 ```
 
-`start` běží v popředí; pro nepřetržitý provoz jej spouští Docker nebo správce služeb. Pokud nemáš právo zapisovat do globálního npm adresáře, použij vlastní prefix — postup pro Docker níže.
+`start` runs in the foreground; use Docker or a service manager for continuous operation. If you cannot write to the global npm directory, use a custom prefix—see the Docker instructions below.
 
-Alternativně lze stáhnout zdrojový projekt:
+Alternatively, clone the source repository:
 
 ```sh
 git clone https://github.com/mezerap/agent-to-discord.git
@@ -49,51 +49,51 @@ npm ci --ignore-scripts
 node src/cli.js setup
 ```
 
-Průvodce se zeptá na kanál, uživatele, pracovní adresář a token bota. Při zadávání tokenu se znaky nezobrazují. Ověří přístup ke kanálu, zjistí server a vytvoří `$CODEX_HOME/agent-to-discord/.env` s privátními právy; bez `CODEX_HOME` použije `~/.codex/agent-to-discord/.env`. Nepřepíše existující soubor. Token neposílej do chatu a nevkládej do příkazové historie. Discord ID najdeš přes Developer Mode → Copy ID.
+The setup wizard asks for the channel, user, workspace, and bot token. Token input is hidden. It verifies channel access, detects the server, and creates `$CODEX_HOME/agent-to-discord/.env` with private file permissions. If `CODEX_HOME` is not set, it uses `~/.codex/agent-to-discord/.env`. It does not overwrite an existing file. Do not send the token in chat or include it in your command history. To find Discord IDs, enable Developer Mode and use Copy ID.
 
 ```sh
 node src/cli.js doctor
 node src/cli.js start
 ```
 
-`doctor` ověří přihlášení Codexu, spojení Discordu a oprávnění kanálu. Neposílá zprávy. Skutečné přijímání textových zpráv ověří až zpráva uživatele do kanálu. Pro globální příkaz lze ve staženém projektu použít `npm install -g .`, potom `agent-to-discord start --env-file /cesta/.env`.
+`doctor` checks your Codex login, Discord connection, and channel permissions. It does not send messages. To verify that text messages are actually received, send a message to the channel as the authorized user. To make the command available globally from a cloned repository, run `npm install -g .`, then `agent-to-discord start --env-file /path/.env`.
 
-Konfigurace v `.env.example`:
+Configuration in `.env.example`:
 
-| Proměnná | Význam |
+| Variable | Description |
 | --- | --- |
-| `DISCORD_TOKEN` | Tajný bot token |
-| `DISCORD_GUILD_ID` | Povolený Discord server |
-| `DISCORD_CHANNEL_ID` | Nadřazený textový kanál |
-| `DISCORD_USER_ID` | Jediný uživatel, který smí agenta ovládat |
-| `AGENT_WORKSPACE` | Pracovní adresář; výchozí aktuální adresář |
-| `AGENT_STATE_DIR` | Trvalý stav mostu; výchozí `$CODEX_HOME/agent-to-discord` |
-| `CODEX_BIN` | Volitelná cesta k CLI, výchozí `codex` |
-| `CODEX_MODEL` | Volitelný model; jinak nastavení Codexu |
+| `DISCORD_TOKEN` | Secret bot token |
+| `DISCORD_GUILD_ID` | Authorized Discord server |
+| `DISCORD_CHANNEL_ID` | Parent text channel |
+| `DISCORD_USER_ID` | The only user allowed to control the agent |
+| `AGENT_WORKSPACE` | Workspace directory; defaults to the current directory |
+| `AGENT_STATE_DIR` | Persistent bridge state; defaults to `$CODEX_HOME/agent-to-discord` |
+| `CODEX_BIN` | Optional CLI path; defaults to `codex` |
+| `CODEX_MODEL` | Optional model; otherwise uses the Codex configuration |
 
-## Použití
+## Usage
 
-Napiš do povoleného kanálu například „Vytvoř jednoduchou HTML stránku“. Bot založí vlákno. Další zadání piš do něj; nová zpráva v nadřazeném kanálu založí novou konverzaci.
+Send a message such as “Create a simple HTML page” in the authorized channel. The bot creates a thread. Send follow-up requests in that thread; a new message in the parent channel starts a new conversation.
 
-| Příkaz | Chování |
+| Command | Behavior |
 | --- | --- |
-| `!help` | Nápověda |
-| `!status` | Skutečný stav posledního úkolu z Codexu, případně poslední odpověď |
-| `!stop` | Požadavek na přerušení běžícího úkolu |
-| `!file web/index.html` | Pošle konkrétní soubor z workspace do Discordu |
-| `!answer {"id_otazky":"odpověď"}` | Odpověď na čekající otázky; použij zaslanou šablonu |
+| `!help` | Show help |
+| `!status` | Retrieve the latest task's actual status from Codex and, when available, its latest response |
+| `!stop` | Request interruption of the running task |
+| `!file web/index.html` | Send a specific file from the workspace to Discord |
+| `!answer {"question_id":"answer"}` | Answer pending questions using the provided template |
 
-Po restartu se rozpracované zadání **nespustí znovu**. Použij `!status` pro zjištění stavu; podle něj můžeš zadat další práci. Zprávy poslané během úplného vypnutí bota se zpětně nenačítají. Pokud Discord nedoručí odpověď, `!status` ji načte z historie Codexu. Přesně jednou doručené síťové operace nelze garantovat; bot při nejasném výsledku žádný úkol automaticky neopakuje.
+After a restart, an unfinished task **is not started again**. Use `!status` to check its state and decide whether to submit more work. Messages sent while the bot is completely offline are not retrieved later. If Discord fails to deliver a response, `!status` retrieves it from Codex history. Exactly-once delivery of network operations cannot be guaranteed; the bot never automatically retries a task when its outcome is uncertain.
 
-### Smazání vlákna
+### Deleting a thread
 
-Při smazání Discord vlákna bot zablokuje další zadání a schválení v této konverzaci, požádá Codex o zastavení aktivního úkolu a po potvrzení zastavení archivuje jeho historii. Teprve po úspěšné archivaci odstraní propojení s Discordem. Nemazají se vytvořené soubory ani historie Codexu; již provedené změny se nevracejí zpět.
+When a Discord thread is deleted, the bot blocks further requests and approvals in that conversation, asks Codex to stop the active task, and archives its history once the stop is confirmed. It removes the Discord mapping only after successful archival. Generated files and Codex history are not deleted, and changes already made are not rolled back.
 
-Vlákna smazaná během vypnutí bota se kontrolují při startu a opětovném připojení. Kontrola se také opakuje každých 5 minut. Archivace či automatické uzavření Discord vlákna není smazání a konverzaci zachová. Výpadek sítě nebo odebrané oprávnění se za smazání nepovažují. Pokud se úklid nepodaří, zůstane uložený jako čekající a bot jej zkusí znovu každých 10 sekund i po restartu.
+Threads deleted while the bot was offline are checked at startup and on reconnection. This check also runs every 5 minutes. Archiving or automatically closing a Discord thread does not count as deletion and preserves the conversation. Network failures and revoked permissions are not treated as deletion. If cleanup fails, it remains saved as pending, and the bot retries every 10 seconds, including after a restart.
 
-## Docker a trvalá data
+## Docker and persistent data
 
-Ve svém existujícím kontejneru můžeš pod uživatelem `node` instalovat balíček do volume:
+In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
 npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.1
@@ -102,17 +102,17 @@ npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/a
 /home/node/.codex/bin/agent-to-discord start
 ```
 
-Instalace i konfigurace tak přežijí znovuvytvoření kontejneru, pokud zachováš volume `/home/node/.codex`. Pro automatický start této instalace nahraď ve svém Compose `sleep infinity`:
+The installation and configuration will survive container recreation as long as you retain the `/home/node/.codex` volume. To start this installation automatically, replace `sleep infinity` in your Compose configuration with:
 
 ```yaml
 command: ["/home/node/.codex/bin/agent-to-discord", "start"]
 ```
 
-Tuto změnu proveď až po instalaci a úspěšném `doctor`. Před nasazením Compose ukonči ručně spuštěného bota. `restart: unless-stopped` zajistí opětovné spuštění po pádu/restartu; samotné spuštění přes `docker exec` tuto vlastnost nemá. Při změně hlavní verze Node nebo architektury balíček znovu nainstaluj.
+Make this change only after installation and a successful `doctor` check. Stop any manually started bot before applying the Compose configuration. `restart: unless-stopped` restarts the container after a crash or restart; running the bot through `docker exec` alone does not provide this behavior. Reinstall the package when changing the Node.js major version or architecture.
 
-Bot běží ve stejném kontejneru jako Codex pod běžným uživatelem `node`. Spouští vlastní `codex app-server --stdio`, používá stejné `CODEX_HOME` a přihlášení. Nemění ani neaktualizuje samostatný CLI daemon. Každé Discord vlákno má vlastní novou Codex konverzaci; nesdílí právě otevřenou interaktivní relaci.
+The bot runs in the same container as Codex under the regular `node` user. It starts its own `codex app-server --stdio`, using the same `CODEX_HOME` and login. It does not modify or update the separate CLI daemon. Each Discord thread gets a new Codex conversation; it does not share your currently open interactive session.
 
-Alternativou k instalaci do volume je zabudování balíčku do image: přidej zdrojový projekt, spusť `npm ci --omit=dev --ignore-scripts` a jako hlavní příkaz kontejneru nastav například:
+As an alternative to installing into a volume, you can build the package into the image: add the source repository, run `npm ci --omit=dev --ignore-scripts`, and set the container's main command, for example:
 
 ```yaml
 command:
@@ -123,19 +123,19 @@ command:
   - /home/node/.codex/agent-to-discord/.env
 ```
 
-Zachovej své existující named volumes pro `/workspace` a `/home/node/.codex`. Konfiguraci a stav bota dej do druhého volume, zdrojový kód zabuduj do image mimo workspace. Doporučené nastavení zůstává `user: node`, `init: true`, `restart: unless-stopped`, bez Docker socketu a bez privileged. Instalace tohoto projektu sama nemění capabilities, AppArmor ani seccomp; host musí podporovat sandbox Codexu.
+Keep your existing named volumes for `/workspace` and `/home/node/.codex`. Store the bot's configuration and state in the second volume, and build the source code into the image outside the workspace. The recommended settings remain `user: node`, `init: true`, and `restart: unless-stopped`, without a Docker socket or privileged mode. Installing this project does not change capabilities, AppArmor, or seccomp; the host must support the Codex sandbox.
 
-Po pádu mostu ukončí proces kontejner; Docker ho znovu spustí podle restart policy. Zálohuj obě volumes. Volume chrání proti znovuvytvoření kontejneru, nikoli proti ztrátě disku nebo smazání dat.
+If the bridge crashes, its process exits and the container stops; Docker restarts it according to the restart policy. Back up both volumes. A volume protects against container recreation, not disk failure or data deletion.
 
-## Oprávnění a soukromí
+## Permissions and privacy
 
-Codex používá `workspace-write` a schvalování `on-request`, s uživatelem jako schvalovatelem. Bot automaticky nezapíná plný přístup ani schvalování bez dotazu. Jednorázové schválení příkazu může umožnit akci mimo vnitřní sandbox; stále platí práva uživatele a omezení Dockeru. Tlačítko je vázané na konkrétní účet, Discord vlákno a aktivní úkol.
+Codex uses `workspace-write` and `on-request` approvals, with the user as the approver. The bot does not automatically enable full access or approval without prompting. A one-time command approval may allow an action outside the inner sandbox; user permissions and Docker restrictions still apply. Each button is tied to a specific account, Discord thread, and active task.
 
-Token se nepředává v prostředí potomka Codexu. To však není úplné oddělení tajných údajů: procesy pod stejným unixovým uživatelem mohou podle systému číst navzájem soubory či prostředí. Workspace, konfigurace a agent nejsou oddělené bezpečnostní kontejnery. Token neukládej do workspace. Bot nepíše obsah úloh do provozních logů; historie zůstává v Codexu a Discordu.
+The token is not passed to the Codex child process's environment. However, this does not fully isolate secrets: depending on the system, processes running under the same Unix user may be able to read each other's files or environment. The workspace, configuration, and agent are not separate security containers. Do not store the token in the workspace. The bot does not write task content to operational logs; history remains in Codex and Discord.
 
-Text konverzace a ručně vyžádané soubory se přenášejí do Discordu. Skryté soubory, běžné autentizační soubory a cesty mimo workspace nelze přes `!file` exportovat; tato kontrola není klasifikátor všech možných tajných údajů. Soubor vyžaduj jen tehdy, když jeho sdílení zamýšlíš.
+Conversation text and explicitly requested files are sent to Discord. Hidden files, common authentication files, and paths outside the workspace cannot be exported through `!file`; this check does not identify every possible secret. Request a file only when you intend to share it.
 
-## Vývoj
+## Development
 
 ```sh
 npm ci --ignore-scripts
@@ -143,6 +143,6 @@ npm test
 npm audit
 ```
 
-Testy pokrývají autorizaci, opakované zprávy, restart, soubory, schvalování, chyby úloh a odpojení RPC. Pro integrační ověření je nutný skutečně přihlášený Codex a vlastní Discord bot. CI testy nepoužívají produkční tokeny.
+Tests cover authorization, duplicate messages, restarts, files, approvals, task errors, and RPC disconnections. Integration testing requires a signed-in Codex instance and your own Discord bot. CI tests do not use production tokens.
 
-MIT licence. Neoficiální projekt; není produktem OpenAI ani Discordu.
+MIT license. An unofficial project; not a product of OpenAI or Discord.
