@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.2
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.3
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -146,7 +146,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.2
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.3
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
@@ -191,6 +191,8 @@ command:
 Keep your existing named volumes for `/workspace` and `/home/node/.codex`. Store the bot's configuration and state in the second volume, and build the source code into the image outside the workspace. The recommended settings remain `user: node`, `init: true`, and `restart: unless-stopped`, without a Docker socket or privileged mode. Installing this project does not change capabilities, AppArmor, or seccomp; the host must support the Codex sandbox.
 
 If the bridge crashes, its process exits and the container stops; Docker restarts it according to the restart policy. Back up both volumes. A volume protects against container recreation, not disk failure or data deletion.
+
+Standalone Discord threads start a fresh Codex conversation when you send their first message. Discord system notices (including the parent channel's thread-created notice) never count as user tasks. Threads created from ordinary tracked messages still fork the original conversation at that message's completed turn.
 
 ## Permissions and privacy
 

@@ -116,7 +116,7 @@ export class Bridge {
   }
 
   async message(message) {
-    if (message.author.bot || !authorized(this.config, message)) return;
+    if (message.system || message.author.bot || !authorized(this.config, message)) return;
     await this.initializations.get(message.channelId);
     if (this.cleanup.isDeleted(message.channelId)) return;
     const text = message.content.trim();

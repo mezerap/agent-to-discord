@@ -287,3 +287,42 @@ test('a stale archive confirmation cannot delete a later archival of the same co
   await f.bridge.ui.remove(f.output, r.codexId, date);
   assert.ok(f.histories.has(r.codexId));
 });
+
+test('standalone thread system notice never starts a parent task; first thread message starts fresh', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  const id = 'standalone', thread = f.channel(id); thread.ownerId = 'owner'; f.channels.set(id, thread);
+  const notice = { id, type: 18, system: true, guildId: 'guild', channelId: 'main', channel: f.channels.get('main'),
+    author: { id: 'owner', bot: false }, content: 'New project', attachments: new Map() };
+  f.messages.set(id, notice);
+  await f.bridge.message(notice);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.state.messages[id], undefined);
+  f.bridge.attach();
+  f.bridge.discord.emit('threadCreate', thread, true);
+  await f.message('First task inside the thread', id);
+  const record = f.state.threads[id];
+  assert.ok(record.active);
+  assert.equal(f.state.threads.main, undefined);
+  assert.equal(f.calls.filter(c => c.method === 'thread/start').length, 1);
+  assert.ok(!f.calls.some(c => c.method === 'thread/fork'));
+  const input = f.calls.find(c => c.method === 'turn/start').params.input;
+  assert.deepEqual(input, [{ type: 'text', text: 'First task inside the thread' }]);
+  await f.finish(record);
+  await f.message('Follow up', id);
+  assert.equal(f.state.threads[id], record);
+});
+
+test('legacy mapping of a ThreadCreated notice cannot fork an unrelated active parent task', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Existing parent work'); const main = f.state.threads.main;
+  const id = 'standalone-legacy'; f.channels.set(id, f.channel(id));
+  f.messages.set(id, { id, type: 18, system: true, author: { id: 'owner' }, content: 'Thread title' });
+  f.state.messages[id] = { codexId: main.codexId, discordId: 'main', turnId: main.turnId };
+  await f.message('Independent task', id);
+  assert.ok(f.state.threads[id].active);
+  assert.notEqual(f.state.threads[id].codexId, main.codexId);
+  assert.equal(f.state.threads.main, main);
+  assert.ok(main.active);
+  assert.ok(!f.calls.some(c => c.method === 'thread/fork'));
+  assert.equal(f.calls.at(-1).params.input.length, 1);
+});

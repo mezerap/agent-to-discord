@@ -28,7 +28,7 @@ export class CodexClient extends EventEmitter {
     });
     const result = await this.call('initialize', {
       capabilities: { experimentalApi: true },
-      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.2.2' },
+      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.2.3' },
     });
     this.write({ method: 'initialized', params: {} });
     return result;

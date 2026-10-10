@@ -1,12 +1,12 @@
 {
   "name": "agent-to-discord",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "agent-to-discord",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "license": "MIT",
       "dependencies": {
         "cron-parser": "5.10.2",

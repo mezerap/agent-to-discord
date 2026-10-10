@@ -53,13 +53,14 @@ export async function createConversation(bridge, channel, text) {
   if (channel.isThread?.() && !bridge.store.state.freshChannels[channel.id]) {
     const ref = bridge.store.state.messages[channel.id];
     source = ref && bridge.record(ref.codexId) && !bridge.store.state.retiredThreads[ref.codexId] ? ref : null;
-    if (!source) {
-      const parent = await bridge.discord.channels.fetch(bridge.config.channelId);
-      try {
-        const starter = await parent.messages.fetch(channel.id);
-        if ([bridge.config.userId, bridge.discord.user?.id].includes(starter.author?.id)) quote = starter.content;
-      } catch (error) { if (![10008, 10003].includes(error.code)) throw error; }
-    }
+    const parent = await bridge.discord.channels.fetch(bridge.config.channelId);
+    try {
+      const starter = await parent.messages.fetch(channel.id);
+      // A standalone thread has a ThreadCreated system notice, not a context-bearing message.
+      // Check even mapped starters: older versions mistakenly processed these notices as prompts.
+      if (starter.system) source = null;
+      else if (!source && [bridge.config.userId, bridge.discord.user?.id].includes(starter.author?.id)) quote = starter.content;
+    } catch (error) { if (![10008, 10003].includes(error.code)) throw error; }
   }
   let result;
   if (source?.turnId) {
