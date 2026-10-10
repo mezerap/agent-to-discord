@@ -70,6 +70,7 @@ export class ConversationUI {
   async reset(output, channelId) {
     const b = this.bridge;
     const record = b.store.state.threads[channelId];
+    if (b.queue.has(channelId)) return say(output, 'Nejprve vyřiď nebo odeber zprávy z /queue. /new čekající zprávy nepřesouvá do nové konverzace.');
     if (b.busy.has(channelId) || record?.active) return say(output, 'Nejprve zastav běžící úkol přes /stop nebo počkej na dokončení.');
     if (record?.uncertain) return say(output, 'Nejprve ověř předchozí úkol přes /status.');
     b.busy.add(channelId);

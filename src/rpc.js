@@ -28,7 +28,7 @@ export class CodexClient extends EventEmitter {
     });
     const result = await this.call('initialize', {
       capabilities: { experimentalApi: true },
-      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.2.3' },
+      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.3.0' },
     });
     this.write({ method: 'initialized', params: {} });
     return result;
@@ -61,7 +61,7 @@ export class CodexClient extends EventEmitter {
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pending.delete(message.id);
-    if (message.error) pending.reject(new Error(message.error.message));
+    if (message.error) pending.reject(Object.assign(new Error(message.error.message), { rpcRejected: true, code: message.error.code }));
     else pending.resolve(message.result);
   }
 

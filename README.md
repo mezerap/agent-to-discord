@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.2.3
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.3.0
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -91,11 +91,22 @@ Type `/` and select a command from this bot. Commands are registered automatical
 | `/automations` | Slash only | List schedules belonging to this destination, inspect state, pause or enable |
 | `/help` | `!help` | Help with tasks, threads, files, and commands |
 | `/status` | `!status` | Retrieve the latest task's actual status and, when available, its latest response |
-| `/stop` | `!stop` | Request interruption of the running task |
+| `/stop` | `!stop` | Interrupt the running task and pause the message queue |
+| `/queue` | `!queue` | Inspect queued messages, push one into the current task, remove it, or resume the queue |
 | `/file cesta:web/index.html` | `!file web/index.html` | Send a specific file from the workspace |
 | `/answer odpoved:yes` | `!answer yes` | Answer one pending question with plain text; for multiple questions, use JSON matching the provided template |
 
-When multiple conversations share a destination (ordinary chat and automation conversations), `/status`, `/stop` and `/answer` offer a private selection menu. `/new` affects only the ordinary chat; it refuses active or uncertain work until `/stop` or `/status` resolves it. Other threads, schedules, Discord messages and workspace files remain.
+When multiple conversations share a destination (ordinary chat and automation conversations), `/status`, `/stop` and `/answer` offer a private selection menu. `/new` affects only the ordinary chat; it refuses active, uncertain or queued work until you finish/check the task and process or remove its queued messages. Other threads, schedules, Discord messages and workspace files remain.
+
+### Messages while the agent is working
+
+Send additional messages normally: each destination has a persistent FIFO queue. After the current task completes successfully, queued messages start separate turns in the same conversation, one at a time. Other channels/threads progress independently. Each acknowledgement offers **Zahrnout hned** (Push now), which uses Codex `turn/steer` to add that specific message to the current turn without stopping it, and **Odebrat z fronty** (Remove from queue). Steering can overtake earlier queued entries because you explicitly chose that message. The agent incorporates it at its next processing opportunity; it cannot undo actions already taken.
+
+Use `/queue` for a private paginated list and fresh action buttons after the original ten-minute buttons expire or the bot restarts. You can inspect message text, remove pending items, and resume a paused queue. Removal preserves the original Discord message and downloaded files. `/stop`, a failed task, or an interrupted task pauses the queue; resume it explicitly through `/queue`. Deleting a Discord thread discards its pending queue. `/new` requires an empty queue, so pending messages cannot silently move into a new conversation. Queued user work takes precedence over scheduled runs in the same destination.
+
+Queue entries store text, quoted context and saved attachment paths in the private bridge state. Attachments download when queued, so expired Discord URLs do not break later delivery; the files remain editable in the shared workspace. Editing/deleting the original Discord message does not edit/cancel its saved queue entry—use `/queue`. Routing is captured when queued: replies to an automation's output keep that automation context. Push now never redirects a normal chat message into an unrelated running automation. Explicit agent questions and approval requests still use `/answer` or their approval buttons.
+
+Undelivered ready entries survive restart. A turn that was active during a restart requires `/status` before dependent queued work continues. If preparation or delivery cannot be confirmed, the entry needs inspection in `/queue` and is not automatically replayed. This prevents blind duplicate execution; it is not an exactly-once guarantee. Check `/status` before removing such an entry and submitting a replacement. An explicit `turn/steer` rejection leaves the message queued for a later turn. See [Codex active-turn steering](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
 
 Starting with version 0.1.4, the former bridge limits of 5 attachments and 8 MiB per file are removed, including the size cap on `/file` and `!file` exports. Incoming attachments are streamed to disk. Actual transfers remain subject to Discord limits, available server resources, and network timeouts. File path and access checks are unchanged.
 
@@ -146,7 +157,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.2.3
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.3.0
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
@@ -223,6 +234,6 @@ npm test
 npm audit
 ```
 
-Tests cover authorization, duplicate messages, restarts, files, approvals, task errors, RPC disconnections, slash commands, typing, main-chat continuity, point-in-history forks, quoted replies, reset races, archive actions, retention/restore races, schedule routing, daylight saving, and uncertain execution recovery. Integration testing requires a signed-in Codex instance and your own Discord bot. CI tests do not use production tokens.
+Tests cover authorization, duplicate messages, restarts, files, approvals, task errors, RPC disconnections, persistent message queues, active-turn steering, slash commands, typing, main-chat continuity, point-in-history forks, quoted replies, reset races, archive actions, retention/restore races, schedule routing, daylight saving, and uncertain execution recovery. Integration testing requires a signed-in Codex instance and your own Discord bot. CI tests do not use production tokens.
 
 MIT license. An unofficial project; not a product of OpenAI or Discord.

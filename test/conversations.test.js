@@ -326,3 +326,174 @@ test('legacy mapping of a ThreadCreated notice cannot fork an unrelated active p
   assert.ok(!f.calls.some(c => c.method === 'thread/fork'));
   assert.equal(f.calls.at(-1).params.input.length, 1);
 });
+
+const flushQueue = async f => { await new Promise(resolve => setImmediate(resolve)); await f.bridge.queue.settle(); };
+
+test('busy messages run FIFO without stop and keep the same conversation', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('First'); const record = f.state.threads.main;
+  await Promise.all([f.message('Second'), f.message('Third')]);
+  assert.deepEqual(f.bridge.queue.entries('main').map(e => e.text), ['Second', 'Third']);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+  assert.equal(f.sent.filter(m => m.components?.length).length, 2);
+  await f.finish(record); await flushQueue(f);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.input[0].text, 'Second');
+  await f.finish(record); await flushQueue(f);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.input[0].text, 'Third');
+  assert.equal(f.calls.filter(c => c.method === 'thread/start').length, 1);
+  assert.equal(f.bridge.queue.entries('main').length, 0);
+});
+
+test('push uses turn/steer exactly once, preserves turn identity and reply mapping', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); const record = f.state.threads.main, turnId = record.turnId;
+  const m = await f.message('Important correction'); const entry = f.bridge.queue.entries('main')[0];
+  const call = f.rpc.call;
+  f.rpc.call = async (method, params) => {
+    if (method === 'turn/steer') { f.calls.push({ method, params }); return { turnId }; }
+    return call(method, params);
+  };
+  await Promise.all([f.bridge.queue.push(entry.id, f.output), f.bridge.queue.push(entry.id, f.output)]);
+  const steer = f.calls.filter(c => c.method === 'turn/steer');
+  assert.equal(steer.length, 1);
+  assert.equal(steer[0].params.expectedTurnId, turnId);
+  assert.equal(steer[0].params.input[0].text, 'Important correction');
+  assert.equal(record.turnId, turnId);
+  assert.equal(f.state.messages[m.id].turnId, turnId);
+  assert.equal(f.bridge.queue.entries('main').length, 0);
+  assert.ok(!f.calls.some(c => c.method === 'turn/interrupt'));
+});
+
+test('a definite steer rejection retains the queue; a lost response never replays it', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); const record = f.state.threads.main;
+  await f.message('Correction'); const entry = f.bridge.queue.entries('main')[0];
+  const call = f.rpc.call;
+  let rejected = true;
+  f.rpc.call = async (method, params) => {
+    if (method === 'turn/steer') throw Object.assign(new Error('test'), rejected ? { rpcRejected: true } : {});
+    return call(method, params);
+  };
+  await f.bridge.queue.push(entry.id, f.output); assert.equal(entry.status, 'queued');
+  rejected = false;
+  await f.bridge.queue.push(entry.id, f.output); assert.equal(entry.status, 'attention');
+  await f.finish(record); await flushQueue(f);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+});
+
+test('stop pauses the queue and new cannot move pending messages into another conversation', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); const record = f.state.threads.main;
+  await f.message('Later');
+  await f.bridge.control('stop', '', 'main', f.output);
+  await f.bridge.notification({ method: 'turn/completed', params: { threadId: record.codexId, turn: { id: record.turnId, status: 'interrupted' } } });
+  await flushQueue(f);
+  assert.equal(f.state.queuePaused.main, true);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+  await f.bridge.ui.reset(f.output, 'main'); assert.equal(f.state.threads.main, record);
+  delete f.state.queuePaused.main;
+  await f.bridge.queue.drain('main');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 2);
+});
+
+test('recovery preserves ready items but never replays dispatching entries', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); await f.message('Unknown'); await f.message('Ready');
+  const entries = f.bridge.queue.entries('main'); entries[0].status = 'dispatching';
+  const reloaded = JSON.parse(JSON.stringify(f.state));
+  f.bridge.store.state = reloaded;
+  await f.bridge.recover(); await flushQueue(f);
+  assert.equal(reloaded.queuedMessages[entries[0].id].status, 'attention');
+  assert.equal(reloaded.queuedMessages[entries[1].id].status, 'queued');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+});
+
+test('deleting a destination removes queued prompts and never starts them', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work', 'thread'); await f.message('Pending', 'thread');
+  await f.bridge.cleanup.remove('thread'); await flushQueue(f);
+  assert.equal(f.bridge.queue.entries('thread').length, 0);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+});
+
+test('queue buttons are owner/channel-bound and cancelled items never run', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); await f.message('Pending');
+  const button = f.sent.at(-1).components[0].components[1];
+  const click = { customId: button.custom_id, channelId: 'main', guildId: 'guild', channel: f.channels.get('main'),
+    user: { id: 'other' }, reply: async () => {}, deferReply: async () => {}, editReply: async () => {}, followUp: async () => {} };
+  await f.bridge.interaction(click); assert.equal(f.bridge.queue.entries('main').length, 1);
+  click.user.id = 'owner'; await f.bridge.interaction(click);
+  assert.equal(f.bridge.queue.entries('main').length, 0);
+});
+
+test('queue does not steer ordinary chat messages into an automation context', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Main history'); const main = f.state.threads.main; await f.finish(main);
+  const { thread } = await f.rpc.call('thread/start', {});
+  const auto = { codexId: thread.id, discordId: 'main', kind: 'automation', active: true, turnId: 'auto-turn' };
+  f.state.threads['automation:test'] = auto;
+  await f.message('Normal chat message'); const entry = f.bridge.queue.entries('main')[0];
+  await f.bridge.queue.push(entry.id, f.output);
+  assert.equal(entry.targetId, main.codexId);
+  assert.ok(!f.calls.some(c => c.method === 'turn/steer'));
+  assert.equal(f.bridge.queue.entries('main').length, 1);
+});
+
+test('queued attachments are downloaded once and survive until dispatch', async t => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const dir = await mkdtemp('/tmp/a2d-queue-files-');
+  const f = fixture(); f.bridge.config.workspace = dir;
+  t.after(async () => { f.bridge.close(); await rm(dir, { recursive: true, force: true }); });
+  let downloads = 0;
+  t.mock.method(globalThis, 'fetch', async () => { downloads++; return new Response('saved attachment'); });
+  await f.message('Work'); const record = f.state.threads.main;
+  await f.bridge.message({ id: '123456', guildId: 'guild', channelId: 'main', channel: f.channels.get('main'), author: { id: 'owner', bot: false }, content: 'Use this file',
+    attachments: new Map([['9', { id: '9', name: 'note.txt', url: 'https://cdn.discordapp.com/attachments/note.txt' }]]) });
+  const entry = f.bridge.queue.entries('main')[0];
+  assert.equal(downloads, 1);
+  assert.match(entry.input[1].text, /discord-uploads/);
+  assert.equal(await readFile(`${dir}/discord-uploads/123456/9-note.txt`, 'utf8'), 'saved attachment');
+  await f.finish(record); await flushQueue(f);
+  assert.equal(downloads, 1);
+  assert.deepEqual(f.calls.filter(c => c.method === 'turn/start').at(-1).params.input, entry.input);
+});
+
+test('queues in separate destinations progress independently', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Main work'); await f.message('Thread work', 'thread');
+  await f.message('Main queued'); await f.message('Thread queued', 'thread');
+  await f.finish(f.state.threads.thread); await flushQueue(f);
+  assert.equal(f.bridge.queue.entries('thread').length, 0);
+  assert.equal(f.bridge.queue.entries('main').length, 1);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.input[0].text, 'Thread queued');
+});
+
+test('a failed queued turn/start is not replayed by repeated drains', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); await f.message('Queued'); const record = f.state.threads.main;
+  const call = f.rpc.call;
+  let attempts = 0;
+  f.rpc.call = async (method, params) => {
+    if (method === 'turn/start') { attempts++; throw new Error('Connection lost after possible acceptance'); }
+    return call(method, params);
+  };
+  await f.finish(record); await flushQueue(f);
+  await f.bridge.queue.drain('main'); await f.bridge.queue.drain('main');
+  assert.equal(attempts, 1);
+  assert.equal(f.bridge.queue.entries('main')[0].status, 'attention');
+  assert.equal(record.uncertain, true);
+});
+
+test('shutdown while preparing a queued dispatch preserves it for inspection', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Work'); await f.message('Queued'); const record = f.state.threads.main;
+  const call = f.rpc.call;
+  f.rpc.call = async (method, params) => {
+    if (method === 'thread/resume') f.bridge.close();
+    return call(method, params);
+  };
+  await f.finish(record); await flushQueue(f);
+  assert.equal(f.bridge.queue.entries('main')[0].status, 'attention');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+});

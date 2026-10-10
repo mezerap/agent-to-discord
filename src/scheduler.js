@@ -124,7 +124,7 @@ export class Scheduler {
     if (!b.ready || b.closing) return;
     for (const job of Object.values(b.store.state.schedules)) {
       if (b.closing || job.status !== 'enabled' || b.cleanup.isDeleted(job.discordId)) continue;
-      if (b.busy.has(job.discordId) || recordsAt(b, job.discordId).some(r => r.active || r.uncertain)) continue;
+      if (b.queue?.has(job.discordId) || b.busy.has(job.discordId) || recordsAt(b, job.discordId).some(r => r.active || r.uncertain)) continue;
       b.busy.add(job.discordId);
       const release = b.cleanup.hold(job.discordId);
       try {

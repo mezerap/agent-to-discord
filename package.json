@@ -1,6 +1,6 @@
 {
   "name": "agent-to-discord",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Talk to your self-hosted Codex agent through Discord channels, threads and scheduled tasks.",
   "repository": {
     "type": "git",

@@ -5,7 +5,9 @@ export function initializeState(state) {
   state.schedules ??= {};
   state.toolResults ??= {};
   state.freshChannels ??= {};
-  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels']) {
+  state.queuedMessages ??= {};
+  state.queuePaused ??= {};
+  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused']) {
     if (!state[key] || typeof state[key] !== 'object' || Array.isArray(state[key])) throw new Error(`Invalid ${key} state.`);
   }
 }
