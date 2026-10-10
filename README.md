@@ -9,6 +9,8 @@ Inspirováno projektem [Agent2Telegram](https://github.com/petrludwig-collab/Age
 - Nové zadání v určeném kanálu → nové Discord vlákno a Codex konverzace.
 - Další zprávy ve vlákně pokračují ve stejné konverzaci.
 - Zprávy agenta a konečný stav, dlouhé odpovědi rozdělené podle limitu Discordu.
+- Příkazy `/help`, `/status`, `/stop`, `/file` a `/answer` v nabídce Discordu s českou nápovědou.
+- Během práce nativní indikátor psaní místo zpráv „Pracuji…“ a „Hotovo.“.
 - Schválení nebo odmítnutí konkrétního příkazu/změny souborů přes tlačítka; úplné podrobnosti v JSON příloze. Po 10 minutách bez odpovědi se požadavek odmítne.
 - Odpovědi na strukturované otázky přes `!answer` podle zaslané šablony.
 - Příchozí soubory a obrázky, nejvýše 5 příloh po 8 MiB; uložení pod `discord-uploads/` v pracovním adresáři.
@@ -32,7 +34,7 @@ Verze 0.1 je určena pro osobního agenta. Hlas, více uživatelů, plánování
 Balíček lze nainstalovat přímo z GitHubu, bez publikace do npm registru:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.1
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.1.2
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -75,13 +77,19 @@ Konfigurace v `.env.example`:
 
 Napiš do povoleného kanálu například „Vytvoř jednoduchou HTML stránku“. Bot založí vlákno. Další zadání piš do něj; nová zpráva v nadřazeném kanálu založí novou konverzaci.
 
-| Příkaz | Chování |
-| --- | --- |
-| `!help` | Nápověda |
-| `!status` | Skutečný stav posledního úkolu z Codexu, případně poslední odpověď |
-| `!stop` | Požadavek na přerušení běžícího úkolu |
-| `!file web/index.html` | Pošle konkrétní soubor z workspace do Discordu |
-| `!answer {"id_otazky":"odpověď"}` | Odpověď na čekající otázky; použij zaslanou šablonu |
+Po zadání `/` vyber příkaz tohoto bota. Příkazy se při startu automaticky zaregistrují pro nakonfigurovaný Discord server. Jejich výsledky vidíš pouze ty, včetně souborů vyžádaných přes `/file`. Původní příkazy s `!` fungují dál a odpovídají do kanálu. Zadání úkolu piš jako běžnou zprávu. Příkazy mají stejné omezení na povoleného uživatele, server a kanál jako zprávy.
+
+| Příkaz v nabídce | Původní zápis | Chování |
+| --- | --- | --- |
+| `/help` | `!help` | Nápověda k úkolům, vláknům, souborům a příkazům |
+| `/status` | `!status` | Skutečný stav posledního úkolu, případně poslední odpověď |
+| `/stop` | `!stop` | Požadavek na přerušení běžícího úkolu |
+| `/file cesta:web/index.html` | `!file web/index.html` | Pošle konkrétní soubor z workspace |
+| `/answer odpoved:ano` | `!answer ano` | Textová odpověď na jednu čekající otázku; pro více otázek použij JSON podle zaslané šablony |
+
+Indikátor psaní se obnovuje každých 8 sekund. Při čekání na schválení nebo odpověď na otázku se pozastaví a po tvé reakci pokračuje. Po dokončení se přestane obnovovat a zůstane pouze odpověď agenta. Discord nemá samostatný příkaz pro vypnutí indikátoru; může proto krátce doběhnout (nejvýše přibližně 10 sekund od posledního signálu). Chyby a zastavení úkolu jsou nadále oznámené zprávou.
+
+Pokud příkazy v nabídce nevidíš, znovu otevři Discord a ověř oprávnění **Use Application Commands** pro svůj účet v daném kanálu. Bot musí být instalovaný s `applications.commands` scope (Discord ho běžně přidává automaticky se scope `bot`).
 
 Po restartu se rozpracované zadání **nespustí znovu**. Použij `!status` pro zjištění stavu; podle něj můžeš zadat další práci. Zprávy poslané během úplného vypnutí bota se zpětně nenačítají. Pokud Discord nedoručí odpověď, `!status` ji načte z historie Codexu. Přesně jednou doručené síťové operace nelze garantovat; bot při nejasném výsledku žádný úkol automaticky neopakuje.
 
@@ -96,7 +104,7 @@ Vlákna smazaná během vypnutí bota se kontrolují při startu a opětovném p
 Ve svém existujícím kontejneru můžeš pod uživatelem `node` instalovat balíček do volume:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.1
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.1.2
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start

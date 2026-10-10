@@ -10,6 +10,7 @@ import { configFromEnv } from './config.js';
 import { CodexClient } from './rpc.js';
 import { Store } from './store.js';
 import { Bridge } from './bridge.js';
+import { registerCommands } from './commands.js';
 
 const command = process.argv[2] || 'help';
 const envIndex = process.argv.indexOf('--env-file');
@@ -91,6 +92,8 @@ async function run() {
     if (command === 'doctor') { console.log('Doctor passed. No Discord message was sent.'); await shutdown(); return; }
 
     await store.open();
+    await registerCommands(discord, config.guildId);
+    console.log('Discord slash commands registered: /help, /status, /stop, /file, /answer.');
     bridge = new Bridge(config, discord, rpc, store);
     bridge.attach();
     await bridge.recover();
