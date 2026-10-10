@@ -24,7 +24,7 @@ export class ThreadCleanup {
   async remove(id) {
     this.deleted.add(id); // Suppress new work and approvals immediately, even while thread/start is pending.
     const record = this.bridge.store.state.threads[id];
-    if (record) record.deleted = true;
+    if (record) { record.deleted = true; record.deletedAt ??= Date.now(); }
     this.bridge.cancelPending(id);
     if (this.jobs.has(id)) return this.jobs.get(id);
 
@@ -42,6 +42,7 @@ export class ThreadCleanup {
     const record = store.state.threads[id];
     if (!record) return;
     record.deleted = true;
+    record.deletedAt ??= Date.now();
     await store.save();
     this.bridge.cancelPending(id);
 
@@ -61,6 +62,10 @@ export class ThreadCleanup {
       // Codex 0.162.1 rejects a repeated archive. Confirm the prior success through its archive index.
       if (!await this.isArchived(record.codexId)) throw error;
     }
+    store.state.retiredThreads ??= {};
+    store.state.retiredThreads[record.codexId] = {
+      codexId: record.codexId, discordId: id, deletedAt: record.deletedAt,
+    };
     delete store.state.threads[id];
     await store.save();
     console.log('Deleted Discord thread: Codex conversation archived; workspace files preserved.');
@@ -79,7 +84,7 @@ export class ThreadCleanup {
   async isArchived(threadId) {
     let cursor;
     do {
-      const page = await this.bridge.rpc.call('thread/list', { archived: true, limit: 100, cursor });
+      const page = await this.bridge.rpc.call('thread/list', { archived: true, modelProviders: [], limit: 100, cursor });
       if (page.data.some(thread => thread.id === threadId)) return true;
       cursor = page.nextCursor;
     } while (cursor);

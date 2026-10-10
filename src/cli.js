@@ -10,6 +10,7 @@ import { configFromEnv } from './config.js';
 import { CodexClient } from './rpc.js';
 import { Store } from './store.js';
 import { Bridge } from './bridge.js';
+import { registerCommands } from './commands.js';
 
 const command = process.argv[2] || 'help';
 const envIndex = process.argv.indexOf('--env-file');
@@ -91,6 +92,8 @@ async function run() {
     if (command === 'doctor') { console.log('Doctor passed. No Discord message was sent.'); await shutdown(); return; }
 
     await store.open();
+    await registerCommands(discord, config.guildId);
+    console.log('Discord slash commands registered: /help, /status, /stop, /file, /answer.');
     bridge = new Bridge(config, discord, rpc, store);
     bridge.attach();
     await bridge.recover();
@@ -109,5 +112,6 @@ else if (command === 'status') {
   const { readFile } = await import('node:fs/promises');
   const config = configFromEnv(process.env, { tokenRequired: false });
   const state = JSON.parse(await readFile(resolve(config.stateDir, 'state.json'), 'utf8'));
-  console.log(JSON.stringify({ conversations: Object.keys(state.threads).length, activeAtLastSave: Object.values(state.threads).filter(t => t.active).length }, null, 2));
+  console.log(JSON.stringify({ conversations: Object.keys(state.threads).length, activeAtLastSave: Object.values(state.threads).filter(t => t.active).length,
+    archivedAwaitingDeletion: Object.keys(state.retiredThreads || {}).length, archiveRetentionDays: 90 }, null, 2));
 } else console.log('agent-to-discord <setup|start|doctor|status> [--env-file /absolute/path/to/.env]');
