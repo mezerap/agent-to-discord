@@ -26,7 +26,11 @@ export class ThreadCleanup {
     for (const record of Object.values(this.bridge.store.state.threads)) {
       if (record.discordId === id) { record.deleted = true; record.deletedAt ??= Date.now(); }
     }
-    for (const job of Object.values(this.bridge.store.state.schedules || {})) if (job.discordId === id) job.status = 'deleted';
+    for (const job of Object.values(this.bridge.store.state.schedules || {})) if (job.discordId === id) {
+      job.status = 'deleted';
+      delete job.pendingDestination;
+      delete job.destinationError;
+    }
     this.bridge.queue?.drop(id);
     this.bridge.cancelPending(id);
     if (this.jobs.has(id)) return this.jobs.get(id);

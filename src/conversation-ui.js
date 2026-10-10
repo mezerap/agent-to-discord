@@ -172,12 +172,25 @@ export class ConversationUI {
     })), async (out, id) => {
       const job = this.bridge.store.state.schedules[id];
       if (!job || job.discordId !== channelId) return say(out, 'Automatizace již není dostupná.');
-      await out.send({ content: `**${escapeMarkdown(job.title)}**\nStav: ${job.status}\n${job.nextRun ? `Další termín: <t:${Math.floor(job.nextRun / 1000)}:f>` : 'Bez dalšího termínu.'}`,
+      await out.send({ content: `**${escapeMarkdown(job.title)}**\nStav: ${job.status}\nCíl: <#${job.discordId}>${job.pendingDestination ? `\nČeká na přesun do <#${job.pendingDestination}>. Původní vlákno zatím nemaž.` : ''}${job.destinationError ? `\n${job.destinationError}` : ''}\n${job.nextRun ? `Další termín: <t:${Math.floor(job.nextRun / 1000)}:f>` : 'Bez dalšího termínu.'}`,
         components: [{ type: 1, components: [
           this.button(channelId, job.status === 'enabled' ? 'Pozastavit' : 'Zapnout', async target => {
+            if (job.discordId !== channelId) return say(target, 'Automatizace se mezitím přesunula. Otevři /automations v novém cíli.');
             await this.bridge.scheduler.setStatus(id, job.status === 'enabled' ? 'paused' : 'enabled');
             await say(target, `Stav automatizace: ${job.status}. Pozastavení nezastavuje právě běžící úkol; použij /stop.`);
           }),
+          ...(channelId !== this.bridge.config.channelId && job.status !== 'deleted' ? [this.button(channelId, 'Posílat do hlavního chatu', async target => {
+            try {
+              const result = await this.bridge.scheduler.delivery.request(job, 'main', channelId);
+              await say(target, result.note);
+            } catch (error) { await say(target, error.message); }
+          })] : []),
+          ...(job.pendingDestination ? [this.button(channelId, 'Zrušit změnu cíle', async target => {
+            try {
+              const result = await this.bridge.scheduler.delivery.request(job, 'here', channelId);
+              await say(target, result.note);
+            } catch (error) { await say(target, error.message); }
+          })] : []),
           { ...this.button(channelId, 'Stav konverzace', target => this.bridge.control('status', '', channelId, target, job.codexId)), disabled: !job.codexId },
         ] }] });
     });

@@ -8,7 +8,7 @@ import { RETENTION_MS } from '../src/archive-retention.js';
 export function fixture() {
   let sequence = 0;
   const calls = [], sent = [], replies = [], histories = new Map(), archived = new Set(), messages = new Map();
-  const channel = id => ({ id, name: `Topic ${id}`, guildId: 'guild', parentId: id === 'main' ? null : 'main', isThread: () => id !== 'main',
+  const channel = id => ({ id, name: `Topic ${id}`, guildId: 'guild', parentId: id === 'main' ? null : 'main', isThread: () => id !== 'main', permissionsFor: () => ({ has: () => true }),
     sendTyping: async () => {}, messages: { fetch: async id => { if (!messages.has(id)) throw { code: 10008 }; return messages.get(id); } },
     send: async payload => { const message = { id: `sent-${++sequence}`, ...payload, author: { id: 'bot', bot: true }, edit: async () => {} }; messages.set(message.id, message); sent.push({ channelId: id, ...message }); return message; },
     threads: { create: async () => { const c = channel(`restored-${++sequence}`); channels.set(c.id, c); return c; } },
@@ -496,4 +496,134 @@ test('shutdown while preparing a queued dispatch preserves it for inspection', a
   await f.finish(record); await flushQueue(f);
   assert.equal(f.bridge.queue.entries('main')[0].status, 'attention');
   assert.equal(f.calls.filter(c => c.method === 'turn/start').length, 1);
+});
+
+test('changing automation destination preserves history, task and next occurrence; old thread deletion is independent', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  const job = await createJob(f, 'thread'), before = structuredClone(job), record = f.bridge.record(job.codexId);
+  const result = await f.bridge.scheduler.delivery.request(job, 'main', 'thread');
+  assert.equal(result.pendingDestination, null);
+  assert.equal(job.discordId, 'main'); assert.equal(record.discordId, 'main');
+  for (const key of ['codexId', 'prompt', 'schedule', 'nextRun', 'status', 'sourceId', 'sourceTurnId']) assert.deepEqual(job[key], before[key]);
+  await f.bridge.cleanup.remove('thread');
+  assert.equal(job.status, 'enabled'); assert.equal(f.bridge.record(job.codexId), record);
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick(); await f.finish(record, 'Moved result');
+  assert.equal(f.sent.at(-1).channelId, 'main');
+  await f.message('Explain the result', 'main', f.sent.at(-1).id);
+  assert.equal(f.calls.at(-1).params.threadId, job.codexId);
+  await f.finish(record);
+  await f.bridge.cleanup.remove('main'); assert.equal(job.status, 'deleted');
+});
+
+test('old persisted tool schema can move through update ID without resetting schedule; tool call is idempotent', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f, 'thread');
+  const source = f.state.threads.thread, before = job.nextRun;
+  const params = { threadId: source.codexId, callId: 'move', arguments: { action: 'update', id: `${job.id}@main` } };
+  const result = await f.bridge.scheduler.tool(source, params);
+  assert.equal(result.destination, 'main'); assert.equal(job.nextRun, before);
+  assert.deepEqual(await f.bridge.scheduler.tool(source, params), result);
+  assert.equal(f.bridge.scheduler.list('thread').length, 0);
+  assert.equal(f.bridge.scheduler.list('main')[0].destination, 'main');
+});
+
+test('active automation finishes at its original destination and waits for queued follow-ups before moving', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f, 'thread');
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick(); const record = f.bridge.record(job.codexId);
+  const result = await f.bridge.scheduler.delivery.request(job, 'main', 'thread');
+  assert.equal(result.pendingDestination, 'main'); assert.equal(record.discordId, 'thread');
+  f.state.queuedMessages.pending = { id: 'pending', discordId: 'thread', targetId: record.codexId, status: 'attention' };
+  await f.finish(record, 'Still here'); assert.equal(f.sent.at(-1).channelId, 'thread');
+  await f.bridge.scheduler.tick(); assert.equal(job.discordId, 'thread');
+  delete f.state.queuedMessages.pending;
+  job.status = 'paused'; await f.bridge.scheduler.tick();
+  assert.equal(job.discordId, 'main'); assert.equal(job.status, 'paused');
+});
+
+test('pending move survives restart state and waits for creation context before original history can be deleted', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Schedule', 'thread'); const source = f.state.threads.thread;
+  const result = await f.bridge.scheduler.tool(source, { threadId: source.codexId, turnId: source.turnId, callId: 'create-pending', arguments: { action: 'create', title: 'Pending', prompt: 'Check', schedule: { type: 'interval', minutes: 60 } } });
+  const job = f.state.schedules[result.id]; await f.bridge.scheduler.delivery.request(job, 'main', 'thread');
+  assert.equal(job.contextPending, true); assert.equal(job.pendingDestination, 'main');
+  await f.finish(source); await f.bridge.scheduler.tick(); await f.bridge.scheduler.tick();
+  assert.equal(job.discordId, 'main'); assert.equal(job.contextPending, false);
+  const persisted = JSON.parse(JSON.stringify(f.state));
+  assert.equal(persisted.threads[`automation:${job.id}`].discordId, 'main');
+  await f.bridge.cleanup.remove('thread'); assert.ok(f.bridge.record(job.codexId));
+});
+
+test('destination updates reject other guilds, other parents, locked or unwritable threads and combined changes', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f);
+  const source = f.state.threads.main;
+  for (const patch of [{ guildId: 'other' }, { parentId: 'other' }, { locked: true }, { archived: true }, { permissionsFor: () => ({ has: () => false }) }]) {
+    f.channels.set('thread', { ...f.channel('thread'), ...patch });
+    await assert.rejects(f.bridge.scheduler.delivery.request(job, 'thread', 'main'));
+    assert.equal(job.discordId, 'main'); assert.equal(job.pendingDestination, undefined);
+  }
+  f.channels.set('thread', f.channel('thread'));
+  await assert.rejects(f.bridge.scheduler.tool(source, { threadId: source.codexId, callId: 'mixed', arguments: { action: 'update', id: job.id, destination: 'thread', prompt: 'changed' } }));
+  const record = f.bridge.record(job.codexId); record.runKind = 'scheduled';
+  await assert.rejects(f.bridge.scheduler.tool(record, { threadId: record.codexId, callId: 'scheduled-move', arguments: { action: 'update', id: job.id, destination: 'thread' } }));
+  record.uncertain = true;
+  await assert.rejects(f.bridge.scheduler.delivery.request(job, 'thread', 'main'));
+  record.uncertain = false;
+  await f.bridge.scheduler.tool(source, { threadId: source.codexId, callId: 'valid-move', arguments: { action: 'update', id: job.id, destination: 'thread' } });
+  assert.equal(job.discordId, 'thread');
+});
+
+test('destination validation cannot resurrect a job whose source is deleted concurrently', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f, 'thread');
+  const fetch = f.bridge.discord.channels.fetch;
+  f.bridge.discord.channels.fetch = async (id, options) => { await f.bridge.cleanup.remove('thread'); return fetch(id, options); };
+  await assert.rejects(f.bridge.scheduler.delivery.request(job, 'main', 'thread'));
+  assert.equal(job.status, 'deleted'); assert.equal(job.discordId, 'thread');
+});
+
+test('failed deferred target validation holds future executions and can be cancelled without altering schedule', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f);
+  const record = f.bridge.record(job.codexId); record.active = true;
+  await f.bridge.scheduler.delivery.request(job, 'thread', 'main');
+  record.active = false; f.channels.delete('thread'); job.nextRun = Date.now() - 1;
+  const before = job.nextRun; await f.bridge.scheduler.tick();
+  assert.ok(job.destinationError); assert.equal(job.discordId, 'main'); assert.equal(record.active, false); assert.equal(job.nextRun, before);
+  await f.bridge.scheduler.delivery.request(job, 'here', 'main');
+  assert.equal(job.pendingDestination, undefined); assert.equal(job.destinationError, undefined); assert.equal(job.nextRun, before);
+});
+
+test('scheduler never starts an old-destination run while a move waits for its context fork', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  const job = await createJob(f, 'thread');
+  job.contextPending = true; delete job.codexId; delete f.state.threads[`automation:${job.id}`];
+  job.pendingDestination = 'main'; job.nextRun = Date.now() - 1;
+  const starts = () => f.calls.filter(c => c.method === 'turn/start').length;
+  const before = starts(); await f.bridge.scheduler.tick();
+  assert.equal(starts(), before); assert.equal(job.discordId, 'thread');
+  await f.bridge.scheduler.tick();
+  assert.equal(job.discordId, 'main'); assert.equal(starts(), before + 1);
+});
+
+test('pending destination is recovered from serialized state without recreating the automation', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f, 'thread');
+  const record = f.bridge.record(job.codexId); record.active = true;
+  await f.bridge.scheduler.delivery.request(job, 'main', 'thread'); record.active = false;
+  const state = JSON.parse(JSON.stringify(f.state));
+  const b = new Bridge(f.bridge.config, f.bridge.discord, f.rpc, { state, save: async () => {} });
+  t.after(() => b.close()); b.ready = true;
+  const forks = f.calls.filter(c => c.method === 'thread/fork').length;
+  await b.scheduler.tick();
+  assert.equal(state.schedules[job.id].discordId, 'main');
+  assert.equal(b.record(job.codexId).discordId, 'main');
+  assert.equal(f.calls.filter(c => c.method === 'thread/fork').length, forks);
+});
+
+test('input arriving during final destination validation stays queued at the original place', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f, 'thread');
+  job.pendingDestination = 'main'; const fetch = f.bridge.discord.channels.fetch;
+  f.bridge.discord.channels.fetch = async (id, options) => {
+    f.state.queuedMessages.race = { id: 'race', discordId: 'thread', targetId: job.codexId, status: 'attention' };
+    return fetch(id, options);
+  };
+  await f.bridge.scheduler.delivery.apply(job);
+  assert.equal(job.discordId, 'thread'); assert.equal(job.pendingDestination, 'main');
+  assert.equal(f.state.queuedMessages.race.targetId, job.codexId);
 });

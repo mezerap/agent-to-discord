@@ -10,7 +10,7 @@ Inspired by [Agent2Telegram](https://github.com/petrludwig-collab/Agent2Telegram
 - Each Discord thread has its own conversation; a thread created from a tracked message forks history through that message’s completed turn when created (or on its first user request if the creation event was missed).
 - Discord replies include the referenced text; replies to automation results continue the automation’s own conversation.
 - `/new` starts fresh and archives the old conversation for 90 days. `/archive` privately lists, displays, restores or deletes tracked histories.
-- Natural-language scheduling with persistent one-time, interval and cron schedules. Results and questions return to the originating channel or thread; `/automations` lists and pauses schedules.
+- Natural-language scheduling with persistent one-time, interval and cron schedules. Results and questions return to their configured channel or thread; `/automations` lists, pauses and redirects schedules.
 - Agent messages and final status, with long responses split to fit Discord's message limit.
 - Slash commands `/help`, `/new`, `/archive`, `/automations`, `/status`, `/stop`, `/file`, and `/answer` in Discord's command menu. The bot's command descriptions and user-facing messages are currently in Czech.
 - A native typing indicator during work instead of separate “Working…” and “Done” messages.
@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.3.0
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.3.1
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -122,9 +122,13 @@ After a restart, an unfinished task **is not started again**. Use `!status` to c
 
 Ask naturally, for example: “Every weekday at 9:00 Prague time, check the project and report the result here.” Codex calls the bridge's `discord_automation` tool to save the schedule. The saved prompt must include the task's details. Creation is reported only after persistence succeeds. The job receives an independent fork of the originating conversation after the scheduling turn finishes.
 
-Supported schedules are one-time ISO dates with an explicit offset, intervals in whole minutes, and five-field cron expressions with an IANA time zone (default `Europe/Prague`). The scheduler runs inside the bridge every 15 seconds; the bot/container must be running. A job submitted in the main channel delivers there; one submitted in a thread delivers in that thread. The destination cannot be selected arbitrarily by the model. Results and clarification/approval requests use the same destination.
+Supported schedules are one-time ISO dates with an explicit offset, intervals in whole minutes, and five-field cron expressions with an IANA time zone (default `Europe/Prague`). The scheduler runs inside the bridge every 15 seconds; the bot/container must be running. A job submitted in the main channel delivers there; one submitted in a thread delivers in that thread. On your explicit request, an existing job can change its destination within the configured main channel and its threads. Results and clarification/approval requests use the same destination.
 
-`/automations` lists the destination's schedules and lets you pause or enable them. You can also ask the agent to list, update, pause or resume a schedule. `/stop` interrupts an invocation; it does not disable future scheduled runs. A failed or uncertain invocation pauses automatic execution for review (`attention`); check `/status`, then enable the schedule when ready. Scheduled invocations cannot create or modify schedules themselves. Existing approvals and sandbox restrictions still apply to scheduled work.
+`/automations` lists the destination's schedules, shows their current/pending destination, and lets you pause, enable or move them to the main chat. You can also ask the agent to list, update, pause or resume a schedule. `/stop` interrupts an invocation; it does not disable future scheduled runs. A failed or uncertain invocation pauses automatic execution for review (`attention`); check `/status`, then enable the schedule when ready. Scheduled invocations cannot create or modify schedules themselves. Existing approvals and sandbox restrictions still apply to scheduled work.
+
+To redirect an existing job, ask in its **current destination**, for example: “From now on, send this automation’s results to the main chat.” For the opposite direction, provide the target thread’s ID or mention. Specify which job if there are several. Its Codex conversation, saved prompt, schedule and next occurrence stay intact; past Discord messages stay where they were. Replies to new results continue the same automation context. Other channels/servers, locked/archived threads and destinations the bot cannot read/write are rejected.
+
+A running task finishes at its original destination. A pending move waits for context preparation and the original destination’s queue to clear, then applies on a scheduler tick (every 15 seconds), including for paused jobs. Check `/automations` before deleting the old thread: **deleting it before the move completes still stops the job**. After the move, deleting the old thread does not affect the automation; deleting its new destination stops it. An inaccessible pending target holds further scheduled runs and displays an error; request the target again after fixing access, or ask to keep delivery “here” to cancel the pending move. Uncertain runs require `/status` first. Existing conversations with the scheduling tool support destination changes without `/new` through a compatibility operation supplied in the bridge instructions.
 
 After downtime, multiple missed occurrences are coalesced into at most one catch-up execution per job. The next occurrence is advanced and saved before execution. A crash or unknown response is never automatically replayed; exactly-once external side effects are not guaranteed. A job waits while its destination has active or uncertain work. `/new` does not stop schedules. Deleting their destination stops them permanently; restoring history does not restart schedules.
 
@@ -157,7 +161,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.3.0
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.3.1
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
