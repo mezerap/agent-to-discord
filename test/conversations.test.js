@@ -229,7 +229,8 @@ test('new inside a forked Discord thread stays clean instead of re-forking its o
   await f.message('Clean start', id);
   assert.ok(f.calls.some(c => c.method === 'thread/start'));
   assert.ok(!f.calls.some(c => c.method === 'thread/fork'));
-  assert.equal(f.calls.at(-1).params.input.length, 1);
+  assert.equal(f.calls.at(-1).params.input.length, 2);
+  assert.match(f.calls.at(-1).params.input.at(-1).text, /Bridge capability notice/);
 });
 
 test('reset and incoming message cannot race into a soon-to-be-archived conversation', async t => {
@@ -309,7 +310,7 @@ test('standalone thread system notice never starts a parent task; first thread m
   assert.equal(f.calls.filter(c => c.method === 'thread/start').length, 1);
   assert.ok(!f.calls.some(c => c.method === 'thread/fork'));
   const input = f.calls.find(c => c.method === 'turn/start').params.input;
-  assert.deepEqual(input, [{ type: 'text', text: 'First task inside the thread' }]);
+  assert.deepEqual(input.slice(0, -1), [{ type: 'text', text: 'First task inside the thread' }]);
   await f.finish(record);
   await f.message('Follow up', id);
   assert.equal(f.state.threads[id], record);
@@ -327,7 +328,8 @@ test('legacy mapping of a ThreadCreated notice cannot fork an unrelated active p
   assert.equal(f.state.threads.main, main);
   assert.ok(main.active);
   assert.ok(!f.calls.some(c => c.method === 'thread/fork'));
-  assert.equal(f.calls.at(-1).params.input.length, 1);
+  assert.equal(f.calls.at(-1).params.input.length, 2);
+  assert.match(f.calls.at(-1).params.input.at(-1).text, /Bridge capability notice/);
 });
 
 const flushQueue = async f => { await new Promise(resolve => setImmediate(resolve)); await f.bridge.queue.settle(); };
@@ -459,7 +461,7 @@ test('queued attachments are downloaded once and survive until dispatch', async 
   assert.equal(await readFile(`${dir}/discord-uploads/123456/9-note.txt`, 'utf8'), 'saved attachment');
   await f.finish(record); await flushQueue(f);
   assert.equal(downloads, 1);
-  assert.deepEqual(f.calls.filter(c => c.method === 'turn/start').at(-1).params.input, entry.input);
+  assert.deepEqual(f.calls.filter(c => c.method === 'turn/start').at(-1).params.input.slice(0, -1), entry.input);
 });
 
 test('queues in separate destinations progress independently', async t => {
@@ -879,4 +881,19 @@ test('file upload intent is durable before network side effects', async t => {
   let attempts = 0; f.channels.get('main').send = async () => { attempts++; };
   f.bridge.store.save = async () => { throw new Error('Disk full'); };
   assert.equal((await requestFile(f, r)).success, false); assert.equal(attempts, 0);
+});
+
+test('every resumed user and scheduled turn receives file compatibility independently of developer instructions', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  const job = await createJob(f);
+  await f.message('Follow up'); await f.finish(f.state.threads.main);
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick();
+  const starts = f.calls.filter(c => c.method === 'turn/start');
+  assert.equal(starts.length, 3);
+  for (const call of starts) {
+    assert.match(call.params.input.at(-1).text, /EXISTING discord_automation/);
+    assert.match(call.params.input.at(-1).text, /does NOT modify a schedule/);
+    assert.match(call.params.input.at(-1).text, /does not request sending any file/);
+  }
+  assert.equal(f.sent.filter(m => m.files).length, 0);
 });

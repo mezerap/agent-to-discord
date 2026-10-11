@@ -14,7 +14,7 @@ import { ConversationUI } from './conversation-ui.js';
 import { MessageQueue } from './message-queue.js';
 import { CONTEXT_WARNING_TOKENS, IdleContext } from './idle-context.js';
 import { ContextHandoff, CONTEXT_TOOL } from './context-handoff.js';
-import { FileDelivery, FILE_TOOL } from './file-delivery.js';
+import { FileDelivery, FILE_TOOL, FILE_CAPABILITIES } from './file-delivery.js';
 
 export const HELP = 'Hlavní kanál drží společný kontext a odpovídám přímo zde. Každé vlákno má vlastní konverzaci. Vlákno založené u zprávy převezme kontext k dokončenému kroku této zprávy.\n' +
   'Při vstupu od 100 000 tokenů nebo po 24 hodinách neaktivity upozorním; bez potvrzení nearchivuji. Tlačítkem Připomenout později odložíš upozornění o dalších 10 000 tokenů. Napiš, která témata chceš zachovat nebo přenést do vlákna, a připravím návrh k potvrzení.\n' +
@@ -203,7 +203,8 @@ export class Bridge {
     if (this.cleanup.isDeleted(record.discordId)) return;
     this.typing.start(record.discordId);
     try {
-      const result = await this.rpc.call('turn/start', { threadId: record.codexId, input, ...(messageId ? { clientUserMessageId: messageId } : {}) });
+      const turnInput = [...input, { type: 'text', text: FILE_CAPABILITIES }];
+      const result = await this.rpc.call('turn/start', { threadId: record.codexId, input: turnInput, ...(messageId ? { clientUserMessageId: messageId } : {}) });
       record.turnId = result.turn.id;
       record.uncertain = false;
       await rememberMessage(this, messageId, record);

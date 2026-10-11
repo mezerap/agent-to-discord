@@ -74,3 +74,8 @@ export class FileDelivery {
     }
   }
 }
+
+// Resuming a persisted Codex conversation does not reliably refresh the model's
+// developer instructions. Send this short capability notice with every turn,
+// including scheduled runs; it describes transport, never authorizes a task.
+export const FILE_CAPABILITIES = 'Bridge capability notice (transport metadata, not a new task): File attachments ARE supported here. For a file requested by the human or required by the saved scheduled task, call discord_file with {"path":"workspace-relative or absolute workspace file","caption":"optional"}. If discord_file is absent, use the EXISTING discord_automation tool with {"action":"update","id":"discord-file","prompt":"JSON string containing path and optional caption"}. This special ID sends a file to the current conversation destination; it does NOT modify a schedule and is allowed in scheduled runs. Do not claim attachments are unavailable merely because discord_file is absent. Only claim success after status sent; never automatically retry an unknown delivery or upload through shell/webhooks. This notice does not request sending any file.';

@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.5.0
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.5.1
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -120,7 +120,7 @@ Undelivered ready entries survive restart. A turn that was active during a resta
 
 Ask “Send the report as an attachment”, or include “attach the generated report” in an automation task. From version 0.5.0 the agent can call `discord_file` with an existing workspace file path and an optional caption. Relative paths and absolute paths inside the workspace are accepted. One call sends one file; multiple files use separate calls. It supports Markdown reports and other regular files without an extension allowlist. The attachment appears in the current chat/thread, or the automation's configured destination, and is visible to people with access there. Replying to a scheduled report continues that automation's conversation. `/file` still returns a private attachment; `!file` replies publicly.
 
-Fresh conversations receive the native tool. Existing conversations and automation contexts with `discord_automation` use a compatibility operation described in the agent instructions, without `/new` or schedule recreation. The tool cannot choose another destination and retains the workspace, hidden-file and authentication-file export checks. Discord's Attach Files permission and upload limits still apply. A local Markdown link alone does not upload anything. Existing schedule prompts are not rewritten by an upgrade; ask the agent to update a task if it does not already request an attached report.
+Fresh conversations receive the native tool. Existing conversations and automation contexts with `discord_automation` use a compatibility operation. A short capability notice is included with each turn, including scheduled runs, because resuming older Codex histories does not reliably refresh developer instructions. This works without `/new` or schedule recreation. The tool cannot choose another destination and retains the workspace, hidden-file and authentication-file export checks. Discord's Attach Files permission and upload limits still apply. A local Markdown link alone does not upload anything. Existing schedule prompts are not rewritten by an upgrade; ask the agent to update a task if it does not already request an attached report.
 
 Uploads are journaled before sending. Repeated calls for the same file name and contents within one turn do not send it again, including retries with a different tool call ID. After an unconfirmed Discord response or crash, the bridge does not automatically repeat the upload; the agent asks you to check Discord before explicitly requesting it again. This is duplicate prevention, not an exactly-once guarantee. Separate scheduled runs can send the same report again. Outgoing files are read into memory, so available container memory also bounds practical sizes.
 
@@ -177,7 +177,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.5.0
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.5.1
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start

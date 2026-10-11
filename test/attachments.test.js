@@ -51,8 +51,9 @@ test('a message with more than five attachments passes every saved file to Codex
     await bridge.message({ id: '123', guildId: 'guild', channelId: 'thread', channel,
       author: { id: 'owner', bot: false }, content: 'Use these files', attachments });
     const input = calls.find(c => c.method === 'turn/start').params.input;
-    assert.equal(input.length, 7);
-    for (const [i, item] of input.slice(1).entries()) {
+    assert.equal(input.length, 8);
+    assert.match(input.at(-1).text, /Bridge capability notice/);
+    for (const [i, item] of input.slice(1, -1).entries()) {
       const path = join(dir, 'discord-uploads', '123', `${600 + i}-large.bin`);
       assert.ok(item.text.includes(path));
       assert.equal(await readFile(path, 'utf8'), 'attachment data');
