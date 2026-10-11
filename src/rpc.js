@@ -1,6 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { createRequire } from 'node:module';
+
+const { version } = createRequire(import.meta.url)('../package.json');
 
 export class CodexClient extends EventEmitter {
   constructor(config) {
@@ -28,7 +31,7 @@ export class CodexClient extends EventEmitter {
     });
     const result = await this.call('initialize', {
       capabilities: { experimentalApi: true },
-      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version: '0.4.0' },
+      clientInfo: { name: 'agent_to_discord', title: 'Agent to Discord', version },
     });
     this.write({ method: 'initialized', params: {} });
     return result;

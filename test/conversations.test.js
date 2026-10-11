@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Bridge } from '../src/bridge.js';
 import { nextRun } from '../src/scheduler.js';
 import { RETENTION_MS } from '../src/archive-retention.js';
@@ -793,4 +796,87 @@ test('handoff preview shows review and destinations inline and preserves complet
   await assert.rejects(f.bridge.handoff.prepare(r, { threadId: r.codexId, callId: 'invalid-review', arguments: {
     archiveSource: true, keep: '', transfers: [], omittedWork: '', archiveOnly: 'BETA',
   } }), /omittedWork/);
+});
+
+async function fileFixture(t) {
+  const f = fixture(), workspace = await mkdtemp(join(tmpdir(), 'a2d-send-file-'));
+  f.bridge.config.workspace = workspace;
+  await writeFile(join(workspace, 'report.md'), '# Complete report\n');
+  t.after(async () => { f.bridge.close(); await f.bridge.fileDelivery.settle(); await rm(workspace, { recursive: true, force: true }); });
+  return { ...f, workspace };
+}
+
+async function requestFile(f, record, { legacy = false, path = 'report.md', callId = 'file-call', turnId = record.turnId, ...extra } = {}) {
+  const arguments_ = { path, caption: 'Report', ...extra };
+  await f.bridge.request({ id: 901, method: 'item/tool/call', params: {
+    threadId: record.codexId, turnId, callId, tool: legacy ? 'discord_automation' : 'discord_file',
+    arguments: legacy ? { action: 'update', id: 'discord-file', prompt: JSON.stringify(arguments_) } : arguments_,
+  } });
+  return f.replies.at(-1).value;
+}
+
+test('native file tool sends complete bytes and maps attachment replies to the source turn', async t => {
+  const f = await fileFixture(t); await f.message('Send report'); const r = f.state.threads.main;
+  assert.ok(f.calls.find(c => c.method === 'thread/start').params.dynamicTools.some(tool => tool.name === 'discord_file'));
+  assert.equal((await requestFile(f, r, { path: join(f.workspace, 'report.md') })).success, true);
+  const sent = f.sent.at(-1);
+  assert.equal(sent.channelId, 'main'); assert.equal(sent.files[0].name, 'report.md');
+  assert.equal(sent.files[0].attachment.toString(), '# Complete report\n');
+  assert.deepEqual(sent.allowedMentions, { parse: [] });
+  assert.equal(f.state.messages[sent.id].turnId, r.turnId);
+  await requestFile(f, r); await requestFile(f, r, { callId: 'model-retry' });
+  assert.equal(f.sent.filter(m => m.files).length, 1);
+});
+
+test('legacy scheduled file delivery stays in each job destination and does not edit schedules', async t => {
+  for (const channelId of ['main', 'thread']) {
+    const f = await fileFixture(t), job = await createJob(f, channelId);
+    job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick();
+    const r = f.bridge.record(job.codexId), before = structuredClone(f.state.schedules);
+    assert.equal(r.runKind, 'scheduled');
+    assert.equal((await requestFile(f, r, { legacy: true })).success, true);
+    const attachment = f.sent.at(-1);
+    assert.equal(attachment.channelId, channelId); assert.deepEqual(f.state.schedules, before);
+    await f.finish(r); await f.message('About this report', channelId, attachment.id);
+    assert.equal(f.calls.at(-1).params.threadId, r.codexId);
+  }
+});
+
+test('file tool rejects secret paths, external symlinks, arbitrary destinations and stale turns', async t => {
+  const f = await fileFixture(t); await f.message('Send report'); const r = f.state.threads.main;
+  await writeFile(join(f.workspace, '.env'), 'private'); await writeFile(join(f.workspace, 'auth.json'), 'private');
+  await symlink('/etc/hosts', join(f.workspace, 'outside'));
+  for (const path of ['.env', 'auth.json', 'outside', '/etc/hosts', '../missing', 'missing.md']) {
+    assert.equal((await requestFile(f, r, { path })).success, false);
+  }
+  assert.equal((await requestFile(f, r, { destination: 'foreign' })).success, false);
+  assert.equal((await requestFile(f, r, { turnId: 'stale-turn' })).success, false);
+  assert.equal(f.sent.filter(m => m.files).length, 0);
+});
+
+test('missing attachment permission and deletion during validation prevent upload', async t => {
+  const f = await fileFixture(t); await f.message('Send report'); const r = f.state.threads.main;
+  f.channels.get('main').permissionsFor = () => ({ has: value => Array.isArray(value) });
+  assert.equal((await requestFile(f, r)).success, false);
+  f.channels.get('main').permissionsFor = () => ({ has: () => { r.deleted = true; return true; } });
+  assert.equal((await requestFile(f, r)).success, false);
+  assert.equal(f.sent.filter(m => m.files).length, 0);
+});
+
+test('unknown file upload is not replayed after restart or under a new call ID', async t => {
+  const f = await fileFixture(t); await f.message('Send report'); const r = f.state.threads.main;
+  let attempts = 0; f.channels.get('main').send = async () => { attempts++; throw new Error('Response lost'); };
+  assert.equal((await requestFile(f, r)).success, false);
+  const saved = JSON.parse(JSON.stringify(f.state)); Object.assign(f.state, saved);
+  const restored = f.state.threads.main;
+  assert.equal((await requestFile(f, restored)).success, false);
+  assert.equal((await requestFile(f, restored, { callId: 'retry' })).success, false);
+  assert.equal(attempts, 1);
+});
+
+test('file upload intent is durable before network side effects', async t => {
+  const f = await fileFixture(t); await f.message('Send report'); const r = f.state.threads.main;
+  let attempts = 0; f.channels.get('main').send = async () => { attempts++; };
+  f.bridge.store.save = async () => { throw new Error('Disk full'); };
+  assert.equal((await requestFile(f, r)).success, false); assert.equal(attempts, 0);
 });

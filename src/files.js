@@ -1,5 +1,5 @@
 import { mkdir, realpath, open, rm } from 'node:fs/promises';
-import { join, relative, isAbsolute, basename } from 'node:path';
+import { join, resolve, relative, isAbsolute, basename } from 'node:path';
 import { constants } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 
@@ -10,7 +10,7 @@ export function isWithin(root, path) {
 
 export async function readWorkspaceFile(workspace, name) {
   const root = await realpath(workspace);
-  const path = await realpath(join(root, name));
+  const path = await realpath(resolve(root, name));
   if (!isWithin(root, path)) throw new Error('File must be inside the workspace.');
   const parts = relative(root, path).split(/[\\/]/);
   if (parts.some(p => p.startsWith('.') || /^(id_rsa|id_ed25519|auth\.json)$/i.test(p))) {

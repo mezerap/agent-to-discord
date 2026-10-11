@@ -68,6 +68,7 @@ async function run() {
     discord.destroy();
     rpc.close();
     await bridge?.queue.settle();
+    await bridge?.fileDelivery.settle();
     await store.close();
     process.exitCode = code;
   };
