@@ -15,6 +15,7 @@ import { MessageQueue } from './message-queue.js';
 import { CONTEXT_WARNING_TOKENS, IdleContext } from './idle-context.js';
 import { ContextHandoff, CONTEXT_TOOL } from './context-handoff.js';
 import { FileDelivery, FILE_TOOL, FILE_CAPABILITIES } from './file-delivery.js';
+import { runFailure, failureText } from './run-failure.js';
 
 export const HELP = 'Hlavní kanál drží společný kontext a odpovídám přímo zde. Každé vlákno má vlastní konverzaci. Vlákno založené u zprávy převezme kontext k dokončenému kroku této zprávy.\n' +
   'Při vstupu od 100 000 tokenů nebo po 24 hodinách neaktivity upozorním; bez potvrzení nearchivuji. Tlačítkem Připomenout později odložíš upozornění o dalších 10 000 tokenů. Napiš, která témata chceš zachovat nebo přenést do vlákna, a připravím návrh k potvrzení.\n' +
@@ -108,7 +109,7 @@ export class Bridge {
       record.active = false;
       record.uncertain = true;
       const job = record.scheduleId && this.store.state.schedules[record.scheduleId];
-      if (job && job.status !== 'deleted') job.status = 'attention';
+      if (job && job.status !== 'deleted') { job.status = 'attention'; job.lastFailure = runFailure(null, 'restart', Date.now(), record.turnId); }
     }
     await this.queue.recover();
     await this.store.save();
@@ -117,6 +118,7 @@ export class Bridge {
     for (const [key, record] of Object.entries(this.store.state.threads)) {
       if (record.retiring && !record.deleted) await this.archives.retire(key, record.retiring).catch(() => {});
     }
+    await this.scheduler.restoreFailures();
     this.ready = true;
     for (const entry of Object.values(this.store.state.queuedMessages)) this.queue.kick(entry.discordId);
   }
@@ -292,6 +294,10 @@ export class Bridge {
     else this.typing.stop(record.discordId);
     await say(channel, `Codex: ${last?.status || 'připraven'}\nKonverzace: ${record.codexId}\n${this.idleContext.status(record)}`);
     if (record.kind === 'main' && record.contextUsage?.inputTokens >= CONTEXT_WARNING_TOKENS) await say(channel, 'Připomenutí velikosti kontextu:', { components: [{ type: 1, components: [this.idleContext.snoozeButton(record)] }] });
+    const job = record.scheduleId && this.store.state.schedules[record.scheduleId];
+    const failure = last?.status === 'failed' ? runFailure(last.error, 'turn', Date.now(), last.id) : job?.lastFailure;
+    if (failure) await say(channel, failureText(failure));
+    if (job?.status === 'attention') await say(channel, 'Automatizace je zablokovaná do opětovného zapnutí v /automations. Uložený další termín sám běh nespustí.');
     await this.handoff.show(channel, record);
     if (last && !record.active) {
       const answer = last.items?.filter(item => item.type === 'agentMessage').map(item => item.text).join('\n\n');
@@ -333,11 +339,15 @@ export class Bridge {
       if (question) { clearTimeout(question.timer); this.questions.delete(recordKey(this, record)); }
       for (const key of this.items.keys()) if (key.startsWith(`${record.codexId}:`)) this.items.delete(key);
       const job = record.scheduleId && this.store.state.schedules[record.scheduleId];
-      if (job && record.runKind === 'scheduled' && params.turn.status === 'failed') { job.status = 'attention'; await this.store.save(); }
+      if (job && record.runKind === 'scheduled' && params.turn.status === 'failed') {
+        job.status = 'attention'; job.lastFailure = runFailure(params.turn.error, 'turn', Date.now(), params.turn.id);
+        await this.store.save();
+      }
       if (params.turn.status !== 'completed') {
         await this.queue.pause(record.discordId);
         const label = { interrupted: 'Úkol zastaven.', failed: 'Úkol selhal. Použij /status pro kontrolu.' };
-        await this.deliver(record, label[params.turn.status] || `Stav: ${params.turn.status}`);
+        const detail = params.turn.status === 'failed' ? ` ${failureText(runFailure(params.turn.error, 'turn'))}${job?.status === 'attention' ? ' Automatizace čeká na opětovné zapnutí v /automations; další termín ji sám nespustí.' : ''}` : '';
+        await this.deliver(record, (label[params.turn.status] || `Stav: ${params.turn.status}`) + detail);
       }
       try {
         await this.idleContext.warn(record);

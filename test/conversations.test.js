@@ -897,3 +897,45 @@ test('every resumed user and scheduled turn receives file compatibility independ
   }
   assert.equal(f.sent.filter(m => m.files).length, 0);
 });
+
+test('failed scheduled turns retain the reason, expose it to the agent and block future runs', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f);
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick();
+  const record = f.bridge.record(job.codexId), turn = f.histories.get(record.codexId).turns.at(-1);
+  Object.assign(turn, { status: 'failed', error: { message: 'Selected model is at capacity.', codexErrorInfo: 'serverOverloaded' } });
+  await f.bridge.notification({ method: 'turn/completed', params: { threadId: record.codexId, turn } });
+  assert.equal(job.status, 'attention'); assert.equal(job.lastFailure.code, 'serverOverloaded');
+  assert.equal(f.bridge.scheduler.list('main')[0].lastFailure.code, 'serverOverloaded');
+  assert.equal(f.bridge.scheduler.list('main')[0].willRun, false);
+  assert.ok(f.sent.some(m => /přetížený/.test(m.content || '')));
+  const calls = f.calls.filter(c => c.method === 'turn/start').length;
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick();
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, calls);
+  await f.bridge.status(f.output, record);
+  assert.ok(f.sent.some(m => /Uložený další termín sám běh nespustí/.test(m.content || '')));
+  await f.bridge.scheduler.setStatus(job.id, 'enabled');
+  assert.equal(job.status, 'enabled'); assert.ok(job.nextRun > Date.now());
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, calls);
+});
+
+test('recovery backfills an older attention reason without retrying its completed attempt', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f);
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick();
+  const record = f.bridge.record(job.codexId), turn = f.histories.get(record.codexId).turns.at(-1);
+  Object.assign(turn, { status: 'failed', completedAt: 1791871246, error: { codexErrorInfo: 'serverOverloaded' } });
+  record.active = false; record.uncertain = false; job.status = 'attention';
+  const calls = f.calls.filter(c => c.method === 'turn/start').length;
+  await f.bridge.scheduler.restoreFailures();
+  assert.equal(job.lastFailure.at, 1791871246000); assert.equal(job.lastFailure.code, 'serverOverloaded');
+  assert.equal(job.lastFailure.turnId, turn.id); assert.equal(job.status, 'attention');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').length, calls);
+});
+
+test('unknown scheduler start failures record their phase without leaking raw exceptions', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); const job = await createJob(f);
+  const original = f.rpc.call;
+  f.rpc.call = async (method, params) => { if (method === 'turn/start') throw new Error('timeout with credential=SECRET'); return original(method, params); };
+  job.nextRun = Date.now() - 1; await f.bridge.scheduler.tick();
+  assert.equal(job.lastFailure.code, 'timeout'); assert.equal(job.lastFailure.phase, 'start');
+  assert.ok(!JSON.stringify(job.lastFailure).includes('SECRET'));
+});

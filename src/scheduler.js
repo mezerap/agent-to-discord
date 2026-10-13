@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { CronExpressionParser } from 'cron-parser';
 import { recordsAt } from './conversations.js';
 import { AutomationDelivery } from './automation-delivery.js';
+import { runFailure, failureText } from './run-failure.js';
 
 export function nextRun(schedule, now = Date.now()) {
   if (schedule.type === 'once') {
@@ -88,8 +89,23 @@ export class Scheduler {
 
   list(channelId) {
     return Object.values(this.bridge.store.state.schedules).filter(j => j.discordId === channelId)
-      .map(({ id, title, prompt, status, nextRun, schedule, discordId, pendingDestination, destinationError }) =>
-        ({ id, title, prompt, status, nextRun, schedule, destination: discordId, pendingDestination, destinationError, moveToMainId: `${id}@main` }));
+      .map(({ id, title, prompt, status, nextRun, schedule, discordId, pendingDestination, destinationError, lastRun, lastFailure }) =>
+        ({ id, title, prompt, status, nextRun, schedule, destination: discordId, pendingDestination, destinationError, lastRun, lastFailure, willRun: status === 'enabled' && !destinationError && !pendingDestination, moveToMainId: `${id}@main` }));
+  }
+
+  async restoreFailures() {
+    const b = this.bridge;
+    for (const job of Object.values(b.store.state.schedules)) {
+      const record = b.record(job.codexId);
+      if (job.status !== 'attention' || job.lastFailure || !record || record.active || record.uncertain || record.runKind !== 'scheduled') continue;
+      try {
+        const thread = await b.cleanup.readThread(job.codexId);
+        const last = thread.turns?.at(-1);
+        if (last?.id !== record.turnId || last?.status !== 'failed') continue;
+        job.lastFailure = runFailure(last.error, 'turn', last.completedAt ? last.completedAt * 1000 : job.lastRun, last.id);
+        await b.store.save();
+      } catch { /* Keep attention and retry recovery on the next restart. */ }
+    }
   }
 
   async setStatus(id, status) {
@@ -143,9 +159,11 @@ export class Scheduler {
       if (b.queue?.has(job.discordId) || b.busy.has(job.discordId) || recordsAt(b, job.discordId).some(r => r.active || r.uncertain)) continue;
       b.busy.add(job.discordId);
       const release = b.cleanup.hold(job.discordId);
+      let phase = 'prepare';
       try {
         await this.prepare(job);
         if (job.contextPending || job.pendingDestination || job.status !== 'enabled' || !job.nextRun || job.nextRun > this.now()) continue;
+        phase = 'destination';
         const channel = await b.discord.channels.fetch(job.discordId, { force: true });
         if (!channel) throw new Error('Missing destination');
         if (b.cleanup.isDeleted(job.discordId) || job.pendingDestination || job.status !== 'enabled') continue;
@@ -157,15 +175,18 @@ export class Scheduler {
         if (!job.nextRun) job.status = 'completed';
         record.runKind = 'scheduled';
         await b.store.save();
+        phase = 'resume';
         await b.rpc.call('thread/resume', { threadId: record.codexId, ...b.threadSettings() });
+        phase = 'start';
         await b.startTurn(record, [{ type: 'text', text: `Naplánované spuštění automatizace „${job.title}“. Nyní ${new Date(this.now()).toISOString()}. Proveď pouze uložené zadání. Neměň rozvrhy a nezakládej další automatizace.\n\n${job.prompt}` }]);
       } catch (error) {
         job.status = 'attention';
+        job.lastFailure = runFailure(error, phase, this.now(), b.record(job.codexId)?.turnId);
         await b.store.save();
         if (error.code === 10003) void b.cleanup.remove(job.discordId);
         else if (!b.cleanup.isDeleted(job.discordId)) {
           const channel = await b.discord.channels.fetch(job.discordId).catch(() => null);
-          await channel?.send({ content: `Automatizace „${job.title}“ vyžaduje kontrolu. Použij /automations a /status; běh se automaticky neopakuje.`, allowedMentions: { parse: [] } }).catch(() => {});
+          await channel?.send({ content: `Automatizace „${job.title}“ vyžaduje kontrolu. ${failureText(job.lastFailure)} Použij /automations a /status; další běhy jsou blokované do opětovného zapnutí.`, allowedMentions: { parse: [] } }).catch(() => {});
         }
       } finally { release(); b.busy.delete(job.discordId); }
     }

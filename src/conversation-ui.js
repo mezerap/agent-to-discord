@@ -3,6 +3,7 @@ import { ChannelType, escapeMarkdown } from 'discord.js';
 import { authorized } from './config.js';
 import { say } from './messages.js';
 import { RETENTION_MS } from './archive-retention.js';
+import { failureText } from './run-failure.js';
 import { forgetMessages, hasPendingWork } from './conversations.js';
 
 export function privateOutput(interaction) {
@@ -174,7 +175,7 @@ export class ConversationUI {
     })), async (out, id) => {
       const job = this.bridge.store.state.schedules[id];
       if (!job || job.discordId !== channelId) return say(out, 'Automatizace již není dostupná.');
-      await out.send({ content: `**${escapeMarkdown(job.title)}**\nStav: ${job.status}\nCíl: <#${job.discordId}>${job.pendingDestination ? `\nČeká na přesun do <#${job.pendingDestination}>. Původní vlákno zatím nemaž.` : ''}${job.destinationError ? `\n${job.destinationError}` : ''}\n${job.nextRun ? `Další termín: <t:${Math.floor(job.nextRun / 1000)}:f>` : 'Bez dalšího termínu.'}`,
+      await out.send({ content: `**${escapeMarkdown(job.title)}**\nStav: ${job.status}${job.status === 'attention' ? '\nDalší běhy jsou blokované do opětovného zapnutí.' : ''}${job.lastFailure ? `\n${escapeMarkdown(failureText(job.lastFailure))}\nČas chyby: <t:${Math.floor(job.lastFailure.at / 1000)}:f>` : ''}\nCíl: <#${job.discordId}>${job.pendingDestination ? `\nČeká na přesun do <#${job.pendingDestination}>. Původní vlákno zatím nemaž.` : ''}${job.destinationError ? `\n${job.destinationError}` : ''}\n${job.nextRun ? `${job.status === 'enabled' ? 'Další termín' : 'Uložený termín (neběží automaticky)'}: <t:${Math.floor(job.nextRun / 1000)}:f>` : 'Bez dalšího termínu.'}`,
         components: [{ type: 1, components: [
           this.button(channelId, job.status === 'enabled' ? 'Pozastavit' : 'Zapnout', async target => {
             if (job.discordId !== channelId) return say(target, 'Automatizace se mezitím přesunula. Otevři /automations v novém cíli.');

@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.5.1
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.5.2
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -144,6 +144,10 @@ Supported schedules are one-time ISO dates with an explicit offset, intervals in
 
 To redirect an existing job, ask in its **current destination**, for example: “From now on, send this automation’s results to the main chat.” For the opposite direction, provide the target thread’s ID or mention. Specify which job if there are several. Its Codex conversation, saved prompt, schedule and next occurrence stay intact; past Discord messages stay where they were. Replies to new results continue the same automation context. Other channels/servers, locked/archived threads and destinations the bot cannot read/write are rejected.
 
+When a scheduled run fails, **attention means future runs are blocked**, even if a saved next-run timestamp is visible. `/automations`, `/status`, and the agent's schedule list expose the last known error category, time and phase. For example, `serverOverloaded` means the selected model was at capacity. Known errors are translated into safe explanations; raw provider output is not posted. Older failed turns are inspected at startup to recover missing reasons when the failed scheduled turn can be identified. No model call or retry is triggered by this recovery.
+
+After checking the result, use **Enable** in `/automations` to resume future scheduled runs; enabling does not immediately replay the failed run. Ask explicitly if you want the agent to retry the work now. The last failure remains visible as historical diagnostic information after re-enabling. Errors do not silently change models or replay a potentially partially completed task.
+
 A running task finishes at its original destination. A pending move waits for context preparation and the original destination’s queue to clear, then applies on a scheduler tick (every 15 seconds), including for paused jobs. Check `/automations` before deleting the old thread: **deleting it before the move completes still stops the job**. After the move, deleting the old thread does not affect the automation; deleting its new destination stops it. An inaccessible pending target holds further scheduled runs and displays an error; request the target again after fixing access, or ask to keep delivery “here” to cancel the pending move. Uncertain runs require `/status` first. Existing conversations with the scheduling tool support destination changes without `/new` through a compatibility operation supplied in the bridge instructions.
 
 After downtime, multiple missed occurrences are coalesced into at most one catch-up execution per job. The next occurrence is advanced and saved before execution. A crash or unknown response is never automatically replayed; exactly-once external side effects are not guaranteed. A job waits while its destination has active or uncertain work. `/new` does not stop schedules. Deleting their destination stops them permanently; restoring history does not restart schedules.
@@ -177,7 +181,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.5.1
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.5.2
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
