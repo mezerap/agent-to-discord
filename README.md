@@ -260,4 +260,10 @@ npm audit
 
 Tests cover authorization, duplicate messages, restarts, files, approvals, task errors, RPC disconnections, persistent message queues, active-turn steering, slash commands, typing, main-chat continuity, point-in-history forks, quoted replies, reset races, archive actions, retention/restore races, schedule routing, daylight saving, and uncertain execution recovery. Integration testing requires a signed-in Codex instance and your own Discord bot. CI tests do not use production tokens.
 
-MIT license. An unofficial project; not a product of OpenAI or Discord.
+## License
+
+This project's original code is licensed under the [MIT License](LICENSE).
+
+Third-party dependencies retain their own licenses: `discord.js` and the `@discordjs/*` packages use Apache-2.0, `tslib` uses 0BSD, and the other current dependencies use MIT. When redistributing dependencies, preserve their applicable license texts, copyright notices, and any required attribution or NOTICE files.
+
+An unofficial project; not a product of OpenAI or Discord.
