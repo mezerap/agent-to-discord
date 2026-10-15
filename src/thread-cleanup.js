@@ -56,6 +56,7 @@ export class ThreadCleanup {
       if (this.bridge.archives) await this.bridge.archives.locked(record.codexId, work);
       else await work();
     }
+    await this.bridge.contextNotes?.sweep(id);
   }
 
   async archiveRecord(key, record, id) {

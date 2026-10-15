@@ -267,3 +267,26 @@ This project's original code is licensed under the [MIT License](LICENSE).
 Third-party dependencies retain their own licenses: `discord.js` and the `@discordjs/*` packages use Apache-2.0, `tslib` uses 0BSD, and the other current dependencies use MIT. When redistributing dependencies, preserve their applicable license texts, copyright notices, and any required attribution or NOTICE files.
 
 An unofficial project; not a product of OpenAI or Discord.
+
+### Stručný kontext každého chatu
+
+Bridge při každém běhu připomene agentovi místní poznámku v
+`<workspace>/.discord-context/<discord-channel-id>.md`. Automatizace mají oddělené
+soubory `<discord-channel-id>--<codex-id>.md`, aby si nepřepisovaly běžný chat.
+Agent poznámku načte, ověří proti aktuálnímu zadání a průběžně aktualizuje:
+nejvýše přibližně 60 řádků s datem, cílem, rozhodnutími, cestami, ověřeným stavem
+a zbývající prací. Hotové úkoly a zastaralé detaily odstraňuje, prázdnou poznámku
+smaže. Aktualizace obsahu závisí na provedení agentem; při přerušení může zůstat
+neúplná. Nejde o automatický přepis celého chatu ani náhradu projektových dat.
+
+Poznámka přežije `/new`, ale slouží pouze jako historický podklad, nikoli jako
+nové zadání nebo oprávnění pokračovat ve staré práci. Tajné údaje ani plné
+přepisy se do ní neukládají. Poznámky jsou místní, mimo Git a neodesílají se.
+Pokud je workspace sám Git repozitářem, přidejte `.discord-context/` do jeho
+lokálního `.git/info/exclude`.
+
+Úklid zajišťuje bridge v existujícím hodinovém cyklu bez nového cronu nebo skillu:
+smaže poznámky neaktualizované 90 dní; po potvrzeném smazání Discord vlákna
+odstraní jeho poznámky ihned po ukončení běžící práce. Aktivní nebo nejisté běhy
+vynechává. Úklid se týká pouze vlastních MD souborů, ne projektových podkladů.
+Novou funkci načte proces bridge při příštím spuštění.

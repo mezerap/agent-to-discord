@@ -1,3 +1,4 @@
+import { ContextNotes } from './context-notes.js';
 import { randomUUID } from 'node:crypto';
 import { say } from './messages.js';
 export { say } from './messages.js';
@@ -48,6 +49,7 @@ export class Bridge {
     this.handoff = new ContextHandoff(this);
     this.fileDelivery = new FileDelivery(this);
     this.retention = new ArchiveRetention(this);
+    this.contextNotes = new ContextNotes(this);
     this.typing = new TypingIndicator({ channels: discord.channels,
       isWorking: id => this.isWorking(id), onMissing: id => { void this.cleanup.remove(id); } });
     this.ready = false;
@@ -78,7 +80,7 @@ export class Bridge {
     this.cleanupTimer.unref();
     this.reconcileTimer = setInterval(() => this.cleanup.reconcile().catch(() => {}), 300_000);
     this.reconcileTimer.unref();
-    this.retentionTimer = setInterval(() => { void this.retention.sweep(); }, RETENTION_CHECK_MS);
+    this.retentionTimer = setInterval(() => { void this.retention.sweep(); void this.contextNotes.sweep().catch(() => { console.error('Context note cleanup pending.'); }); }, RETENTION_CHECK_MS);
     this.retentionTimer.unref();
     this.scheduler.start();
     this.queueTimer = setInterval(() => {
@@ -205,7 +207,7 @@ export class Bridge {
     if (this.cleanup.isDeleted(record.discordId)) return;
     this.typing.start(record.discordId);
     try {
-      const turnInput = [...input, { type: 'text', text: FILE_CAPABILITIES }];
+      const turnInput = [...input, { type: 'text', text: FILE_CAPABILITIES + '\n' + this.contextNotes.reminder(record) }];
       const result = await this.rpc.call('turn/start', { threadId: record.codexId, input: turnInput, ...(messageId ? { clientUserMessageId: messageId } : {}) });
       record.turnId = result.turn.id;
       record.uncertain = false;

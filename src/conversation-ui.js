@@ -89,7 +89,7 @@ export class ConversationUI {
       delete b.store.state.contextSeeds[channelId];
       b.store.state.freshChannels[channelId] = true;
       await b.store.save();
-      await say(output, 'Další zpráva začne čistou konverzaci. Předchozí historie je v /archive a po 90 dnech se smaže. Zprávy, soubory, ostatní konverzace a automatizace zůstávají.');
+      await say(output, 'Další zpráva začne čistou konverzaci. Předchozí historie je v /archive a po 90 dnech se smaže. Zprávy, soubory, ostatní konverzace a automatizace zůstávají. Stručná místní poznámka může zůstat jako podklad; není oprávněním pokračovat ve starém úkolu.');
     } finally { release(); b.busy.delete(channelId); }
   }
 
