@@ -22,7 +22,7 @@ import { ModelSelection } from './models.js';
 export const HELP = 'Hlavní kanál drží společný kontext a odpovídám přímo zde. Každé vlákno má vlastní konverzaci. Vlákno založené u zprávy převezme kontext k dokončenému kroku této zprávy.\n' +
   'Při vstupu od 100 000 tokenů nebo po 24 hodinách neaktivity upozorním; bez potvrzení nearchivuji. Tlačítkem Připomenout později odložíš upozornění o dalších 10 000 tokenů. Napiš, která témata chceš zachovat nebo přenést do vlákna, a připravím návrh k potvrzení.\n' +
   '`/new` čistá konverzace · `/archive` archivy · `/automations` opakované úkoly\n' +
-  '`/model` výběr modelu pro další zadání v tomto chatu; běžící úkol se nemění.\n' +
+  '`/model` výběr modelu a úrovně přemýšlení pro další zadání v tomto chatu; běžící úkol se nemění.\n' +
   '`/help` nápověda · `/status` stav a poslední odpověď · `/stop` zastavení právě běžícího úkolu\n' +
   '`/queue` fronta zpráv · tlačítko Zahrnout hned doplní běžící úkol bez zastavení. Nové zprávy během práce jinak čekají ve frontě. /stop frontu pozastaví.\n' +
   'O přílohu můžeš požádat běžnou zprávou, také v zadání automatizace; odešlu ji do tohoto chatu či vlákna. `/file cesta` stáhne soubor soukromě · `/answer odpoved` odpoví na otázku agenta.\n' +

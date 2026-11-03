@@ -2,7 +2,7 @@ import { Routes } from 'discord.js';
 import { authorized } from './config.js';
 
 export const COMMANDS = [
-  { name: 'model', description: 'Vybere model Codexu pro další zadání v tomto kanálu nebo vlákně.' },
+  { name: 'model', description: 'Vybere model Codexu a úroveň přemýšlení pro další zadání v tomto kanálu nebo vlákně.' },
   { name: 'queue', description: 'Fronta zpráv: přehled, zahrnutí do běžícího úkolu, odebrání a pokračování.' },
   { name: 'new', description: 'Začne čistou konverzaci; předchozí archivuje na 90 dní.' },
   { name: 'archive', description: 'Soukromý přehled archivů: historie, obnovení a smazání.' },

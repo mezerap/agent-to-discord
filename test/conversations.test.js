@@ -68,8 +68,8 @@ export function fixture() {
 function enableModelCatalog(f) {
   const call = f.rpc.call;
   f.rpc.call = async (method, params) => method === 'model/list' ? { data: [
-    { model: 'gpt-sol', defaultReasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
-    { model: 'gpt-luna', defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'medium' }] },
+    { model: 'gpt-sol', defaultReasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }] },
+    { model: 'gpt-luna', defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }] },
   ], nextCursor: null } : call(method, params);
 }
 
@@ -82,18 +82,22 @@ test('model selection preserves history, stays destination-specific and survives
   assert.equal(f.calls.find(c => c.method === 'turn/start').params.effort, 'medium');
   await f.finish(original);
   await f.bridge.control('model', 'gpt-sol', 'main', f.output);
+  await f.bridge.models.selectEffort(f.output, 'main', 'gpt-sol', 'high');
   await f.message('Next');
   assert.equal(f.state.threads.main.codexId, original.codexId);
   assert.equal(f.calls.filter(c => c.method === 'thread/resume').at(-1).params.model, 'gpt-sol');
   assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.model, 'gpt-sol');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.effort, 'high');
   await f.finish(original);
   await f.message('Independent', 'thread');
   assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.model, undefined);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.effort, undefined);
   await f.finish(f.state.threads.thread);
   await f.bridge.control('new', '', 'main', f.output);
   await f.message('New history');
   assert.notEqual(f.state.threads.main.codexId, original.codexId);
   assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.model, 'gpt-sol');
+  assert.equal(f.calls.filter(c => c.method === 'turn/start').at(-1).params.effort, 'high');
 });
 
 test('switching model during work does not interrupt, resume or replace the active turn', async t => {
@@ -118,11 +122,13 @@ test('a queued message uses the model selected after that message was queued', a
   await f.message('First'); const record = f.state.threads.main;
   await f.message('Queued next');
   await f.bridge.control('model', 'gpt-luna', 'main', f.output);
+  await f.bridge.models.selectEffort(f.output, 'main', 'gpt-luna', 'high');
   await f.finish(record);
   await f.bridge.queue.settle();
   const turns = f.calls.filter(c => c.method === 'turn/start');
   assert.equal(turns.length, 2);
   assert.equal(turns[1].params.model, 'gpt-luna');
+  assert.equal(turns[1].params.effort, 'high');
   assert.equal(turns[1].params.input[0].text, 'Queued next');
 });
 
@@ -149,12 +155,37 @@ test('future scheduled turns use the destination model without changing their sa
   const f = fixture(); t.after(() => f.bridge.close()); enableModelCatalog(f);
   const job = await createJob(f), prompt = job.prompt;
   await f.bridge.control('model', 'gpt-luna', 'main', f.output);
+  await f.bridge.models.selectEffort(f.output, 'main', 'gpt-luna', 'high');
   job.nextRun = Date.now() - 1;
   await f.bridge.scheduler.tick();
   const start = f.calls.filter(c => c.method === 'turn/start' && c.params.threadId === job.codexId).at(-1);
   assert.equal(start.params.model, 'gpt-luna');
-  assert.equal(start.params.effort, 'medium');
+  assert.equal(start.params.effort, 'high');
   assert.equal(job.prompt, prompt);
+});
+
+test('changing effort during an in-flight start applies only to the following turn', async t => {
+  const f = fixture(); t.after(() => f.bridge.close()); enableModelCatalog(f);
+  await f.bridge.control('model', 'gpt-sol', 'main', f.output);
+  let release, held = false;
+  f.bridge.store.save = async () => {
+    if (!held && f.state.threads.main?.active) {
+      held = true;
+      await new Promise(resolve => { release = resolve; });
+    }
+  };
+  const starting = f.message('Already starting');
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  await f.bridge.models.selectEffort(f.output, 'main', 'gpt-sol', 'high');
+  release(); await starting;
+  const record = f.state.threads.main;
+  assert.equal(f.calls.filter(c => c.method === 'turn/start')[0].params.effort, 'low');
+  await f.bridge.control('status', '', 'main', f.output);
+  await f.finish(record);
+  await f.message('Following turn');
+  assert.equal(f.state.threads.main.codexId, record.codexId);
+  assert.equal(f.calls.filter(c => c.method === 'turn/start')[1].params.effort, 'high');
+  assert.ok(!f.calls.some(c => c.method === 'turn/interrupt'));
 });
 
 test('main channel keeps context, sends directly, and persists reply references for every chunk', async t => {

@@ -96,7 +96,7 @@ Type `/` and select a command from this bot. Commands are registered automatical
 
 | Slash command | Original syntax | Behavior |
 | --- | --- | --- |
-| `/model` | `!model` or `!model model-id` | Choose a Codex model for the next task in this destination |
+| `/model` | `!model` or `!model model-id` | Choose a Codex model and reasoning effort for the next task in this destination |
 | `/new` | `!new` | Archive this channel/thread’s current ordinary chat for 90 days; the next message starts fresh |
 | `/archive` | Slash only | Private paginated archive list, history download, restore to a new thread, confirmed permanent deletion |
 | `/automations` | Slash only | List schedules belonging to this destination, inspect state, pause or enable |
@@ -109,11 +109,11 @@ Type `/` and select a command from this bot. Commands are registered automatical
 
 When multiple conversations share a destination (ordinary chat and automation conversations), `/status`, `/stop` and `/answer` offer a private selection menu. `/new` affects only the ordinary chat; it refuses active, uncertain or queued work until you finish/check the task and process or remove its queued messages. Other threads, schedules, Discord messages and workspace files remain.
 
-### Choosing a model
+### Choosing a model and reasoning effort
 
-Use `/model` to open a private selection menu populated from the connected Codex app-server's `model/list` catalog. The catalog is cached for up to one minute and paginated when necessary. Choose a model to save it for this Discord channel or thread. Other destinations keep their own settings. The choice survives `/new` and bot restarts without discarding conversation history.
+Use `/model` to open a private selection menu populated from the connected Codex app-server's `model/list` catalog. The catalog is cached for up to one minute and paginated when necessary. Choose a model, then use the second menu to select one of its advertised reasoning effort levels. Both menus paginate when necessary. The model and effort are saved together for this Discord channel or thread. Other destinations keep their own settings. The choice survives `/new` and bot restarts without discarding conversation history.
 
-The choice applies to the next task, including queued messages and future automation runs delivered to this destination. It does not interrupt, restart or steer an active task. Each selected model uses its own catalog default reasoning effort, so an unsupported effort is not carried over from the previous model. Without an explicit choice, the bridge keeps using the conversation/Codex configuration, including `CODEX_MODEL` when set. Deleting the Discord thread removes its model preference.
+The choice applies to the next task, including queued messages and future automation runs delivered to this destination. It does not interrupt, restart or steer an active task. Switching to a different model starts with that model's catalog default effort (or its first supported level if the advertised default is invalid); reselecting the same model preserves a supported custom effort. Models with no advertised effort levels offer no effort menu. Old effort menus cannot change the settings of a different model. Without an explicit model choice, the bridge keeps using the conversation/Codex configuration, including `CODEX_MODEL` when set. Deleting the Discord thread removes its model and effort preference.
 
 The catalog is not an account entitlement check. If a model is unavailable to the signed-in account or at capacity, Codex reports the task failure normally; the bridge does not silently switch models or retry the task. The legacy `!model model-id` syntax accepts only models in the same catalog and replies publicly, like other `!` commands.
 

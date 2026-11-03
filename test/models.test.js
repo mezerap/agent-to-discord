@@ -7,9 +7,9 @@ import { ModelSelection } from '../src/models.js';
 import { Store } from '../src/store.js';
 import { initializeState } from '../src/conversations.js';
 
-function model(id, effort = 'low') {
+function model(id, effort = 'low', levels = [effort]) {
   return { id, model: id, displayName: id, defaultReasoningEffort: effort,
-    supportedReasoningEfforts: [{ reasoningEffort: effort }] };
+    supportedReasoningEfforts: levels.map(reasoningEffort => ({ reasoningEffort, description: `Reasoning ${reasoningEffort}` })) };
 }
 
 function fixture(items = [model('gpt-sol'), model('gpt-luna', 'medium')]) {
@@ -66,16 +66,89 @@ test('selection validates the catalog and uses the new model default effort per 
 
 test('model preference survives a real Store close and reopen', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'discord-model-'));
-  const f = fixture();
+  const f = fixture([model('gpt-sol'), model('gpt-luna', 'medium', ['medium', 'high'])]);
   const store = new Store(dir);
   t.after(async () => { await store.close(); await rm(dir, { recursive: true, force: true }); });
   await store.open();
   initializeState(store.state);
   f.bridge.store = store;
   await f.selection.select(f.output, 'thread', 'gpt-luna');
+  await f.selection.selectEffort(f.output, 'thread', 'gpt-luna', 'high');
   await store.close();
   await store.open();
-  assert.deepEqual(store.state.modelPreferences.thread, { model: 'gpt-luna', effort: 'medium' });
+  assert.deepEqual(store.state.modelPreferences.thread, { model: 'gpt-luna', effort: 'high' });
+});
+
+test('effort picker preserves catalog order and renders only the selected model supported levels', async () => {
+  const f = fixture([model('gpt-sol', 'low', ['low', 'ultra', 'medium']), model('gpt-luna', 'medium')]);
+  await f.selection.select(f.output, 'main', 'gpt-sol');
+  const menu = f.sent.at(-1).components[1].toJSON().components[0];
+  assert.deepEqual(menu.options.map(item => item.value), ['low', 'ultra', 'medium']);
+  assert.equal(menu.options.find(item => item.default).value, 'low');
+  assert.equal(menu.options[1].description, 'Reasoning ultra');
+  await f.selection.selectEffort(f.output, 'main', 'gpt-sol', 'ultra');
+  assert.deepEqual(f.selection.turnSettings('main'), { model: 'gpt-sol', effort: 'ultra' });
+  assert.deepEqual(f.selection.turnSettings('thread'), {});
+  await f.selection.select(f.output, 'main', 'gpt-sol');
+  assert.equal(f.selection.turnSettings('main').effort, 'ultra');
+  await f.selection.select(f.output, 'main', 'gpt-luna');
+  assert.deepEqual(f.selection.turnSettings('main'), { model: 'gpt-luna', effort: 'medium' });
+  await f.selection.selectEffort(f.output, 'main', 'gpt-luna', 'ultra');
+  await f.selection.selectEffort(f.output, 'main', 'gpt-sol', 'low');
+  assert.deepEqual(f.selection.turnSettings('main'), { model: 'gpt-luna', effort: 'medium' });
+});
+
+test('effort catalog handles duplicates, invalid defaults and models without effort choices', async () => {
+  const entry = model('gpt-sol', 'missing', ['high', 'high', '', 'x'.repeat(101), 'low']);
+  const f = fixture([entry, model('no-effort', 'low', [])]);
+  await f.selection.select(f.output, 'main', 'gpt-sol');
+  assert.equal(f.selection.turnSettings('main').effort, 'high');
+  assert.deepEqual(f.sent.at(-1).components[1].toJSON().components[0].options.map(item => item.value), ['high', 'low']);
+  await f.selection.select(f.output, 'main', 'no-effort');
+  assert.deepEqual(f.selection.turnSettings('main'), { model: 'no-effort', effort: null });
+  assert.equal(f.sent.at(-1).components.length, 1);
+  await f.selection.selectEffort(f.output, 'main', 'no-effort', 'high');
+  assert.equal(f.selection.turnSettings('main').effort, null);
+});
+
+test('effort pagination keeps every choice reachable within Discord limits', async () => {
+  const levels = Array.from({ length: 31 }, (_, i) => `effort-${i}`);
+  const f = fixture([model('gpt-sol', levels[0], levels)]);
+  await f.selection.select(f.output, 'thread', 'gpt-sol');
+  let rows = f.sent.at(-1).components.map(row => row.toJSON());
+  assert.equal(rows[1].components[0].options.length, 25);
+  const next = rows[2].components[1].custom_id;
+  const event = interaction({ customId: next, isStringSelectMenu: () => false, isButton: () => true });
+  await f.selection.interaction(event);
+  rows = event.replies.at(-1).edit.components.map(row => row.toJSON());
+  assert.equal(rows[1].components[0].options.length, 6);
+  assert.equal(rows[2].components[1].disabled, true);
+  await f.selection.interaction(interaction({ customId: rows[1].components[0].custom_id, values: ['effort-29'] }));
+  assert.equal(f.selection.turnSettings('thread').effort, 'effort-29');
+});
+
+test('failed effort persistence rolls back to the previously saved level', async () => {
+  const f = fixture([model('gpt-sol', 'low', ['low', 'high'])]);
+  await f.selection.select(f.output, 'main', 'gpt-sol');
+  f.bridge.store.save = async () => { throw new Error('disk unavailable'); };
+  await assert.rejects(f.selection.selectEffort(f.output, 'main', 'gpt-sol', 'high'));
+  assert.deepEqual(f.selection.turnSettings('main'), { model: 'gpt-sol', effort: 'low' });
+});
+
+test('effort selection revalidates destination and model after a delayed catalog read', async () => {
+  for (const deleted of [false, true]) {
+    const f = fixture([model('gpt-sol', 'low', ['low', 'high'])]);
+    await f.selection.select(f.output, 'main', 'gpt-sol');
+    f.selection.cached = null;
+    let resolve;
+    f.bridge.rpc.call = () => new Promise(done => { resolve = done; });
+    const pending = f.selection.selectEffort(f.output, 'main', 'gpt-sol', 'high');
+    if (deleted) f.bridge.cleanup.isDeleted = () => true;
+    else f.state.modelPreferences.main = { model: 'other', effort: 'medium' };
+    resolve({ data: [model('gpt-sol', 'low', ['low', 'high'])] });
+    await pending;
+    assert.equal(f.selection.turnSettings('main').effort, deleted ? 'low' : 'medium');
+  }
 });
 
 test('failed persistence does not claim success or leave an unapplied preference in memory', async () => {
@@ -112,6 +185,30 @@ test('authorized selection acknowledges before work and edits its private picker
   await f.selection.interaction(event);
   assert.equal(f.state.modelPreferences.thread.model, 'gpt-luna');
   assert.deepEqual(event.replies.at(-1).edit.allowedMentions, { parse: [] });
+});
+
+test('effort interactions enforce authorization and reject stale model menus', async () => {
+  const f = fixture([model('gpt-sol', 'low', ['low', 'high']), model('gpt-luna', 'medium')]);
+  await f.selection.select(f.output, 'thread', 'gpt-sol');
+  const customId = f.sent.at(-1).components[1].toJSON().components[0].custom_id;
+  const request = overrides => interaction({ customId, values: ['high'], ...overrides });
+  for (const override of [{ user: { id: 'stranger' } }, { guildId: 'other' }, { channel: { isThread: () => false } }]) {
+    const event = request(override);
+    await f.selection.interaction(event);
+    assert.equal(event.replies[0].reply.flags, 64);
+    assert.equal(f.selection.turnSettings('thread').effort, 'low');
+  }
+  const event = request();
+  f.bridge.store.save = async () => assert.deepEqual(event.replies[0], { deferred: true });
+  await f.selection.interaction(event);
+  assert.equal(f.selection.turnSettings('thread').effort, 'high');
+  assert.deepEqual(event.replies.at(-1).edit.allowedMentions, { parse: [] });
+  f.bridge.store.save = async () => {};
+  await f.selection.select(f.output, 'thread', 'gpt-luna');
+  const stale = request();
+  await f.selection.interaction(stale);
+  assert.match(stale.replies.at(-1).edit.content, /Model se.*změnil/);
+  assert.deepEqual(f.selection.turnSettings('thread'), { model: 'gpt-luna', effort: 'medium' });
 });
 
 test('a deleted destination cannot be changed after a delayed catalog read', async () => {
