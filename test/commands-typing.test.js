@@ -6,6 +6,15 @@ import { Bridge } from '../src/bridge.js';
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
+test('/model is registered and opens the destination model picker privately', async () => {
+  assert.ok(COMMANDS.some(command => command.name === 'model'));
+  const f = interactionFixture();
+  f.interaction.commandName = 'model';
+  await handleCommand(f.bridge, f.interaction);
+  assert.deepEqual(f.calls[0], { defer: { flags: 64 } });
+  assert.deepEqual(f.calls[1], { name: 'model', arg: '', id: 'thread' });
+});
+
 test('guild commands are registered without deleting unrelated commands or updating unchanged ones', async () => {
   const writes = [];
   const discord = { application: { id: 'app' }, rest: {

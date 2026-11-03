@@ -141,7 +141,7 @@ export class Scheduler {
     job.preparing = true;
     await b.store.save();
     const fork = await b.rpc.call('thread/fork', { threadId: job.sourceId, lastTurnId: job.sourceTurnId,
-      deferGoalContinuation: true, ...b.threadSettings() });
+      deferGoalContinuation: true, ...b.threadSettings(job.discordId) });
     const record = { codexId: fork.thread.id, discordId: job.discordId, kind: 'automation', title: job.title,
       active: false, scheduleId: job.id, tools: source?.tools };
     b.store.state.threads[`automation:${job.id}`] = record;
@@ -176,7 +176,7 @@ export class Scheduler {
         record.runKind = 'scheduled';
         await b.store.save();
         phase = 'resume';
-        await b.rpc.call('thread/resume', { threadId: record.codexId, ...b.threadSettings() });
+        await b.rpc.call('thread/resume', { threadId: record.codexId, ...b.threadSettings(record.discordId) });
         phase = 'start';
         await b.startTurn(record, [{ type: 'text', text: `Naplánované spuštění automatizace „${job.title}“. Nyní ${new Date(this.now()).toISOString()}. Proveď pouze uložené zadání. Neměň rozvrhy a nezakládej další automatizace.\n\n${job.prompt}` }]);
       } catch (error) {

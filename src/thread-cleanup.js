@@ -33,6 +33,7 @@ export class ThreadCleanup {
     }
     this.bridge.queue?.drop(id);
     delete this.bridge.store.state.contextSeeds?.[id];
+    delete this.bridge.store.state.modelPreferences?.[id];
     for (const [key, plan] of Object.entries(this.bridge.store.state.contextPlans || {})) {
       if (plan.sourceChannel === id && plan.phase === 'proposed') delete this.bridge.store.state.contextPlans[key];
     }

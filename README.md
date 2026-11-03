@@ -12,7 +12,7 @@ Inspired by [Agent2Telegram](https://github.com/petrludwig-collab/Agent2Telegram
 - `/new` starts fresh and archives the old conversation for 90 days. `/archive` privately lists, displays, restores or deletes tracked histories.
 - Natural-language scheduling with persistent one-time, interval and cron schedules. Results and questions return to their configured channel or thread; `/automations` lists, pauses and redirects schedules.
 - Agent messages and final status, with long responses split to fit Discord's message limit.
-- Slash commands `/help`, `/new`, `/archive`, `/automations`, `/status`, `/stop`, `/file`, and `/answer` in Discord's command menu. The bot's command descriptions and user-facing messages are currently in Czech.
+- Slash commands `/help`, `/model`, `/new`, `/archive`, `/automations`, `/status`, `/stop`, `/file`, and `/answer` in Discord's command menu. The bot's command descriptions and user-facing messages are currently in Czech.
 - A native typing indicator during work instead of separate “Working…” and “Done” messages.
 - Buttons to approve or reject a specific command or set of file changes, with full details in a JSON attachment. Requests are rejected after 10 minutes without a response.
 - Answers to structured questions through `/answer` or `!answer`, using plain text for one question or the provided JSON template for multiple questions.
@@ -27,7 +27,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 ## Requirements
 
 - Node.js 22.12+ and `ps` (the `procps` package on Debian).
-- Codex CLI installed and signed in. The integration has been verified with version **0.162.1**; the app-server interface may change between versions.
+- Codex CLI installed and signed in. The integration has been verified with version **0.166.0**; the app-server interface may change between versions.
 - A Discord bot with **Message Content Intent** enabled under Developer Portal → Bot.
 - The bot added to your server with **View Channel, Send Messages, Create Public Threads, Send Messages in Threads, Read Message History, Attach Files** permissions in the designated text channel. Administrator permission is not required.
 - Outbound HTTPS/WebSocket connections to Discord and OpenAI. No inbound port or public webhook is needed.
@@ -96,6 +96,7 @@ Type `/` and select a command from this bot. Commands are registered automatical
 
 | Slash command | Original syntax | Behavior |
 | --- | --- | --- |
+| `/model` | `!model` or `!model model-id` | Choose a Codex model for the next task in this destination |
 | `/new` | `!new` | Archive this channel/thread’s current ordinary chat for 90 days; the next message starts fresh |
 | `/archive` | Slash only | Private paginated archive list, history download, restore to a new thread, confirmed permanent deletion |
 | `/automations` | Slash only | List schedules belonging to this destination, inspect state, pause or enable |
@@ -107,6 +108,14 @@ Type `/` and select a command from this bot. Commands are registered automatical
 | `/answer odpoved:yes` | `!answer yes` | Answer one pending question with plain text; for multiple questions, use JSON matching the provided template |
 
 When multiple conversations share a destination (ordinary chat and automation conversations), `/status`, `/stop` and `/answer` offer a private selection menu. `/new` affects only the ordinary chat; it refuses active, uncertain or queued work until you finish/check the task and process or remove its queued messages. Other threads, schedules, Discord messages and workspace files remain.
+
+### Choosing a model
+
+Use `/model` to open a private selection menu populated from the connected Codex app-server's `model/list` catalog. The catalog is cached for up to one minute and paginated when necessary. Choose a model to save it for this Discord channel or thread. Other destinations keep their own settings. The choice survives `/new` and bot restarts without discarding conversation history.
+
+The choice applies to the next task, including queued messages and future automation runs delivered to this destination. It does not interrupt, restart or steer an active task. Each selected model uses its own catalog default reasoning effort, so an unsupported effort is not carried over from the previous model. Without an explicit choice, the bridge keeps using the conversation/Codex configuration, including `CODEX_MODEL` when set. Deleting the Discord thread removes its model preference.
+
+The catalog is not an account entitlement check. If a model is unavailable to the signed-in account or at capacity, Codex reports the task failure normally; the bridge does not silently switch models or retry the task. The legacy `!model model-id` syntax accepts only models in the same catalog and replies publicly, like other `!` commands.
 
 ### Messages while the agent is working
 

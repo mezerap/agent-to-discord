@@ -9,7 +9,8 @@ export function initializeState(state) {
   state.queuePaused ??= {};
   state.contextSeeds ??= {};
   state.contextPlans ??= {};
-  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans']) {
+  state.modelPreferences ??= {};
+  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans', 'modelPreferences']) {
     if (!state[key] || typeof state[key] !== 'object' || Array.isArray(state[key])) throw new Error(`Invalid ${key} state.`);
   }
 }
@@ -74,9 +75,9 @@ export async function createConversation(bridge, channel, text) {
   let result;
   if (source?.turnId) {
     result = await bridge.archives.locked(source.codexId, () => bridge.rpc.call('thread/fork', { threadId: source.codexId, lastTurnId: source.turnId,
-      deferGoalContinuation: true, ...bridge.threadSettings() }));
+      deferGoalContinuation: true, ...bridge.threadSettings(channel.id) }));
   } else {
-    result = await bridge.rpc.call('thread/start', bridge.newThreadSettings());
+    result = await bridge.rpc.call('thread/start', bridge.newThreadSettings(channel.id));
   }
   const record = { discordId: channel.id, codexId: result.thread.id, active: false,
     title: (channel.isThread?.() ? channel.name || 'Vlákno' : text || 'Hlavní chat').slice(0, 90),

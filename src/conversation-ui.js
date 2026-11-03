@@ -144,7 +144,7 @@ export class ConversationUI {
       const channel = await b.discord.channels.fetch(r.restoreTarget, { force: true });
       if (!channel || b.cleanup.isDeleted(channel.id)) throw new Error('Restore destination was deleted.');
       if (await b.cleanup.isArchived(id)) await b.rpc.call('thread/unarchive', { threadId: id });
-      await b.rpc.call('thread/resume', { threadId: id, ...b.threadSettings() });
+      await b.rpc.call('thread/resume', { threadId: id, ...b.threadSettings(channel.id) });
       b.store.state.threads[channel.id] = { codexId: id, discordId: channel.id, title: r.title, kind: 'thread', active: false, tools: r.tools };
       delete b.store.state.retiredThreads[id];
       await b.store.save();
