@@ -10,7 +10,8 @@ export function initializeState(state) {
   state.contextSeeds ??= {};
   state.contextPlans ??= {};
   state.modelPreferences ??= {};
-  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans', 'modelPreferences']) {
+  for (const key of ['projects', 'destinations', 'tasks', 'incidents', 'eventReceipts', 'scheduleArchive']) state[key] ??= {};
+  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans', 'modelPreferences', 'projects', 'destinations', 'tasks', 'incidents', 'eventReceipts', 'scheduleArchive']) {
     if (!state[key] || typeof state[key] !== 'object' || Array.isArray(state[key])) throw new Error(`Invalid ${key} state.`);
   }
 }
@@ -72,6 +73,11 @@ export async function createConversation(bridge, channel, text) {
       else if (!source && [bridge.config.userId, bridge.discord.user?.id].includes(starter.author?.id)) quote = starter.content;
     } catch (error) { if (![10008, 10003].includes(error.code)) throw error; }
   }
+  if (!bridge.store.state.destinations[channel.id] && source) {
+    const workspace = bridge.workspaceSnapshot(source.discordId, bridge.record(source.codexId));
+    if (workspace && typeof workspace === 'object') bridge.store.state.destinations[channel.id] = structuredClone(workspace);
+  }
+  if (bridge.store.state.destinations[channel.id]) await bridge.projects.resolveSettings(channel.id);
   let result;
   if (source?.turnId) {
     result = await bridge.archives.locked(source.codexId, () => bridge.rpc.call('thread/fork', { threadId: source.codexId, lastTurnId: source.turnId,
@@ -81,7 +87,7 @@ export async function createConversation(bridge, channel, text) {
   }
   const record = { discordId: channel.id, codexId: result.thread.id, active: false,
     title: (channel.isThread?.() ? channel.name || 'Vlákno' : text || 'Hlavní chat').slice(0, 90),
-    kind: channel.isThread?.() ? 'thread' : 'main', tools: source ? bridge.record(source.codexId)?.tools : true };
+    workspace: bridge.workspaceSnapshot(channel.id), kind: channel.isThread?.() ? 'thread' : 'main', tools: source ? bridge.record(source.codexId)?.tools : true };
   bridge.store.state.threads[channel.id] = record;
   delete bridge.store.state.freshChannels[channel.id];
   await bridge.store.save();
@@ -118,7 +124,7 @@ export class ConversationArchives {
       try { await this.bridge.rpc.call('thread/archive', { threadId: record.codexId }); }
       catch (error) { if (!await this.bridge.cleanup.isArchived(record.codexId)) throw error; }
       store.state.retiredThreads[record.codexId] = { codexId: record.codexId, discordId: record.discordId,
-        deletedAt: ['new', 'idle', 'handoff'].includes(reason) ? Date.now() : record.deletedAt, title: record.title || 'Konverzace', kind: record.kind || 'thread', reason, tools: record.tools };
+        deletedAt: ['new', 'idle', 'handoff'].includes(reason) ? Date.now() : record.deletedAt, title: record.title || 'Konverzace', kind: record.kind || 'thread', reason, tools: record.tools, workspace: record.workspace };
       delete store.state.threads[key];
       await store.save();
     });

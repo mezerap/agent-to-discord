@@ -22,7 +22,7 @@ Inspired by [Agent2Telegram](https://github.com/petrludwig-collab/Agent2Telegram
 - Persistent conversation mapping, duplicate message protection, and connection diagnostics.
 - Deleting a Discord thread interrupts the running task, rejects pending approvals, and archives the Codex conversation. Tracked archives are permanently deleted after 90 days; files in the workspace are preserved.
 
-Version 0.2 is intended for a personal agent. Voice, multiple users, and connections to arbitrary existing terminals are not implemented. Each destination runs at most one task at a time: incoming requests are rejected while busy, and scheduled tasks wait until that destination is idle. Different destinations can work concurrently in the same workspace. It does not allow general permission expansion requests or MCP forms. If the command or file changes cannot be displayed, the approval button remains disabled.
+This bridge is intended for a personal agent. Voice, multiple users, and connections to arbitrary existing terminals are not implemented. Each destination runs at most one task at a time: incoming requests wait in a persistent queue while busy, and scheduled tasks wait until that destination is idle. Different destinations can use independent project/task worktrees; worktrees are not security boundaries. It does not allow general permission expansion requests or MCP forms. If the command or file changes cannot be displayed, the approval button remains disabled.
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Version 0.2 is intended for a personal agent. Voice, multiple users, and connect
 The package can be installed directly from GitHub without being published to the npm registry:
 
 ```sh
-npm install --global git+https://github.com/mezerap/agent-to-discord.git#v0.5.2
+npm install --global git+https://github.com/mezerap/agent-to-discord.git#main
 agent-to-discord setup
 agent-to-discord doctor
 agent-to-discord start
@@ -96,6 +96,9 @@ Type `/` and select a command from this bot. Commands are registered automatical
 
 | Slash command | Original syntax | Behavior |
 | --- | --- | --- |
+| `/project` | `!project project-id` | Choose an allowlisted project for this destination |
+| `/task akce:new nazev:fix-login` | Slash recommended | Create a Git worktree; status, review, pr and merge manage the task |
+| `/knowledge akce:search text:proxy` | Slash recommended | Search, add, update or delete explicit project notes with sources |
 | `/model` | `!model` or `!model model-id` | Choose a Codex model and reasoning effort for the next task in this destination |
 | `/new` | `!new` | Archive this channel/thread’s current ordinary chat for 90 days; the next message starts fresh |
 | `/archive` | Slash only | Private paginated archive list, history download, restore to a new thread, confirmed permanent deletion |
@@ -113,7 +116,7 @@ When multiple conversations share a destination (ordinary chat and automation co
 
 Use `/model` to open a private selection menu populated from the connected Codex app-server's `model/list` catalog. The catalog is cached for up to one minute and paginated when necessary. Choose a model, then use the second menu to select one of its advertised reasoning effort levels. Both menus paginate when necessary. The model and effort are saved together for this Discord channel or thread. Other destinations keep their own settings. The choice survives `/new` and bot restarts without discarding conversation history.
 
-The choice applies to the next task, including queued messages and future automation runs delivered to this destination. It does not interrupt, restart or steer an active task. Switching to a different model starts with that model's catalog default effort (or its first supported level if the advertised default is invalid); reselecting the same model preserves a supported custom effort. Models with no advertised effort levels offer no effort menu. Old effort menus cannot change the settings of a different model. Without an explicit model choice, the bridge keeps using the conversation/Codex configuration, including `CODEX_MODEL` when set. Deleting the Discord thread removes its model and effort preference.
+The choice applies to the next task, including queued messages and future automation runs configured to inherit this destination. Automations with pinned model/effort keep their own settings. It does not interrupt, restart or steer an active task. Switching to a different model starts with that model's catalog default effort (or its first supported level if the advertised default is invalid); reselecting the same model preserves a supported custom effort. Models with no advertised effort levels offer no effort menu. Old effort menus cannot change the settings of a different model. Without an explicit model choice, the bridge keeps using the conversation/Codex configuration, including `CODEX_MODEL` when set. Deleting the Discord thread removes its model and effort preference.
 
 The catalog is not an account entitlement check. If a model is unavailable to the signed-in account or at capacity, Codex reports the task failure normally; the bridge does not silently switch models or retry the task. The legacy `!model model-id` syntax accepts only models in the same catalog and replies publicly, like other `!` commands.
 
@@ -190,7 +193,7 @@ Archives created before version 0.1.3 are not automatically adopted: the bridge 
 In an existing container, you can install the package into a volume as the `node` user:
 
 ```sh
-npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#v0.5.2
+npm install --global --prefix /home/node/.codex git+https://github.com/mezerap/agent-to-discord.git#main
 /home/node/.codex/bin/agent-to-discord setup
 /home/node/.codex/bin/agent-to-discord doctor
 /home/node/.codex/bin/agent-to-discord start
@@ -299,3 +302,50 @@ smaže poznámky neaktualizované 90 dní; po potvrzeném smazání Discord vlá
 odstraní jeho poznámky ihned po ukončení běžící práce. Aktivní nebo nejisté běhy
 vynechává. Úklid se týká pouze vlastních MD souborů, ne projektových podkladů.
 Novou funkci načte proces bridge při příštím spuštění.
+
+
+## Project workspaces (0.6)
+
+`/project` chooses from the operator-maintained `projects` allowlist in private bridge state. A project can be a Git checkout or a directory of data/documents. `/task akce:new nazev:short-name` requires a Git repository and creates a branch `codex/<name>-<id>` in `worktrees/<project>/<id>`. Source drafts are preserved and not copied into the new worktree; its base is a committed revision. The selected directory survives restart and `/new`. Forked conversations retain their source workspace; use a new task to separate files. Existing schedules hold their own directory snapshot even if chat routing changes.
+
+Suggested layout:
+
+```text
+/workspace/
+  projects/       # canonical projects (legacy aliases can remain)
+  worktrees/      # isolated Git task checkouts
+  knowledge/      # explicit project notes, sources and dates
+  artifacts/      # review packages and incident evidence
+  discord-uploads/
+  .discord-context/
+```
+
+`/task akce:status` shows the branch, commit and changes. `review` writes a committed binary patch and metadata naming the exact base/head, file list and whether drafts remain. Agent 2 stays `awaiting-connection`; a prepared package does not mean a review was performed. `pr` starts an explicit agent task to verify/publish that exact branch and create or find its PR with existing authenticated tools. Missing credentials are reported, never extracted by the bridge. `merge` requires clean source/task trees, the original base and correct branch, then fast-forwards the **local** source branch. It does not push or remove worktrees.
+
+`/knowledge` scopes every operation to the selected project. Notes include source and creation/update timestamps; search returns up to 20 matches. Only explicit additions are stored, not whole transcripts. The agent tool treats returned content as historical reference. Scheduled runs cannot modify notes. Explicit project selection is required.
+
+## Automation execution and delivery
+
+In `/automations`, select a job to pin its own model and supported reasoning effort or inherit the chat selection. Unsupported combinations stop execution for inspection instead of silently selecting another model. Each invocation snapshots settings before asynchronous work; changes apply to later invocations. “Spustit nyní” queues one manual invocation without moving the saved cron/interval time. It may therefore be followed by the next normally scheduled invocation.
+
+The last 30 runs distinguish execution status, model/effort, start/end, and delivery (`sent`, `unknown`, `suppressed`). Unknown starts or sends are not replayed. Settings changes cannot restart active work. Pause disables scheduled invocations; `/stop` interrupts the current one.
+
+Delivery defaults to every run. For change-only checks, the agent reports a verified stable `key` and `ok`/`problem` using `discord_result`. Identical keys/statuses stay quiet; the first result and transitions, including recovery, are announced. Failures are always reported. Without a structured key, exact output text is compared; prose/time changes count as changes. File delivery in this mode requires the result first and suppresses unchanged attachments. Normal reports should keep delivery `always`.
+
+## Verified events
+
+Events are optional and need no public port. The operator creates `events.json` in the private state directory with a random key of at least 32 bytes and an explicit source map:
+
+```json
+{"key":"<private random secret>","sources":{"coolify":{"projectId":"operations","destination":"<configured parent channel ID>"}}}
+```
+
+The signed JSON spool is `event-inbox/` beside that configuration, owned by the bridge user, mode 0700. Envelopes contain `id`, `source`, `resource`, `occurredAt`, `summary`, `status`, then a hex `signature` of HMAC-SHA256 over `JSON.stringify(envelopeWithoutSignature)`. See `signEvent` in `src/event-inbox.js`. Sources determine the project and destination; payload routing is ignored. Limits: 64 KiB, five-minute timestamp window, ten accepted events/minute/source, bounded batches and receipts. Drop files atomically. Do not expose the signing key to an unauthenticated webhook.
+
+Authenticated changes reuse an incident thread per source/resource; repeated identical states are silent. The original data is kept under `artifacts/incidents`. No inference starts automatically. A human can request follow-up diagnostics in the thread. Creation/delivery is journaled before external effects; an uncertain result requires inspection instead of retries.
+
+`ops/coolify-events.py` is an optional host-side health sampler. Its private config contains `bridge_state_dir` (host volume path) and an allowlist of `containers`. Run from a protected service/timer on the host; it reads Docker state, signs transitions, and writes the spool. A healthy first sample is silent. It does not expose Docker to the agent. Other n8n/GitHub producers may use the same signed contract; they require separately configured verified source credentials/routing. This package does not automatically install workflows or public webhooks.
+
+## Operator migration
+
+`src/platform-migration.js` provides an explicit, tested migration helper for a stopped bridge. It archives old schedule definitions, creates fresh conversations for active recurring tasks, preserves their instructions/cadence/destination, and pins verified settings with explicit project mapping. Paused/completed schedules stay archived. It refuses active/uncertain work, pending context creation and unmapped tasks, and cannot run twice. Application startup never silently reorganizes project files or rebuilds schedules. Stop the application through its deployment manager before updating state; keep legacy path aliases until all external references have been migrated. User data and dirty checkouts must be preserved.

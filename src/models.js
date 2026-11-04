@@ -105,7 +105,7 @@ export class ModelSelection {
     const current = selected ? `**${selected.model}** (uvažování: ${selected.effort || 'výchozí'})` :
       `podle konverzace a konfigurace Codexu${this.bridge.config.model ? ` (${this.bridge.config.model})` : ''}`;
     return say(output, `${notice ? `${notice}\n` : ''}Volba tohoto chatu: ${current}.\n` +
-      'Platí od dalšího zadání, také pro budoucí běhy automatizací v tomto chatu. Běžící úkol se nemění. Volba zůstává po /new i restartu.\n' +
+      'Platí od dalšího zadání, také pro automatizace nastavené na dědění. Připnuté modely automatizací se nemění. Běžící úkol se nemění. Volba zůstává po /new i restartu.\n' +
       `${effortHint}\nNabídka Codexu${lastPage ? ` · strana ${page + 1}/${lastPage + 1}` : ''}:`, { components });
   }
 

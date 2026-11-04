@@ -34,6 +34,7 @@ export class ThreadCleanup {
     this.bridge.queue?.drop(id);
     delete this.bridge.store.state.contextSeeds?.[id];
     delete this.bridge.store.state.modelPreferences?.[id];
+    delete this.bridge.store.state.destinations?.[id];
     for (const [key, plan] of Object.entries(this.bridge.store.state.contextPlans || {})) {
       if (plan.sourceChannel === id && plan.phase === 'proposed') delete this.bridge.store.state.contextPlans[key];
     }
@@ -87,7 +88,7 @@ export class ThreadCleanup {
     store.state.retiredThreads ??= {};
     store.state.retiredThreads[record.codexId] = {
       codexId: record.codexId, discordId: id, deletedAt: record.deletedAt,
-      ...(record.title ? { title: record.title, kind: record.kind, tools: record.tools, reason: 'deleted' } : {}),
+      ...(record.title ? { title: record.title, kind: record.kind, tools: record.tools, workspace: record.workspace, reason: 'deleted' } : {}),
     };
     delete store.state.threads[key];
     await store.save();

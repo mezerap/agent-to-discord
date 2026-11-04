@@ -2,6 +2,19 @@ import { Routes } from 'discord.js';
 import { authorized } from './config.js';
 
 export const COMMANDS = [
+  { name: 'project', description: 'Vybere projekt a pracovní adresář pro tento chat.', options: [
+    { type: 3, name: 'projekt', description: 'ID projektu; bez zadání otevře nabídku' },
+  ] },
+  { name: 'task', description: 'Worktree úkolu, stav, příprava review, PR nebo místní sloučení.', options: [
+    { type: 3, name: 'akce', description: 'Akce úkolu', choices: ['new', 'status', 'review', 'pr', 'merge'].map(value => ({ name: value, value })) },
+    { type: 3, name: 'nazev', description: 'Pro new: krátký název malými písmeny, čísly a pomlčkami' },
+  ] },
+  { name: 'knowledge', description: 'Hledá a spravuje explicitní poznámky zvoleného projektu.', options: [
+    { type: 3, name: 'akce', description: 'Akce poznámek', choices: ['search', 'add', 'update', 'delete'].map(value => ({ name: value, value })) },
+    { type: 3, name: 'text', description: 'Dotaz pro hledání nebo celý text poznámky' },
+    { type: 3, name: 'id', description: 'ID poznámky pro update/delete' },
+    { type: 3, name: 'zdroj', description: 'Odkaz na zdrojovou zprávu Discordu' },
+  ] },
   { name: 'model', description: 'Vybere model Codexu a úroveň přemýšlení pro další zadání v tomto kanálu nebo vlákně.' },
   { name: 'queue', description: 'Fronta zpráv: přehled, zahrnutí do běžícího úkolu, odebrání a pokračování.' },
   { name: 'new', description: 'Začne čistou konverzaci; předchozí archivuje na 90 dní.' },
@@ -27,7 +40,7 @@ export async function registerCommands(discord, guildId) {
     const desiredOptions = command.options || [];
     const actualOptions = current.options || [];
     const sameOptions = actualOptions.length === desiredOptions.length && desiredOptions.every((option, index) =>
-      Object.entries(option).every(([key, value]) => actualOptions[index][key] === value));
+      Object.entries(option).every(([key, value]) => JSON.stringify(actualOptions[index][key]) === JSON.stringify(value)));
     if (current.description === command.description && sameOptions) continue;
     await discord.rest.patch(Routes.applicationGuildCommand(discord.application.id, guildId, current.id), { body: command });
   }
@@ -51,7 +64,10 @@ export async function handleCommand(bridge, interaction) {
   try {
     const name = interaction.commandName;
     const argument = name === 'file' ? interaction.options.getString('cesta', true) :
-      name === 'answer' ? interaction.options.getString('odpoved', true) : '';
+      name === 'answer' ? interaction.options.getString('odpoved', true) :
+      name === 'project' ? { project: interaction.options.getString('projekt') } :
+      name === 'task' ? { action: interaction.options.getString('akce') || 'status', name: interaction.options.getString('nazev') } :
+      name === 'knowledge' ? { action: interaction.options.getString('akce') || 'search', text: interaction.options.getString('text'), id: interaction.options.getString('id'), source: interaction.options.getString('zdroj') } : '';
     await bridge.control(name, argument, interaction.channelId, output);
   } catch {
     await output.send({ content: 'Příkaz se nepodařilo dokončit. Zkontroluj zadání; stav úkolu ověříš přes /status.' });

@@ -98,7 +98,7 @@ async function run() {
 
     await store.open();
     await registerCommands(discord, config.guildId);
-    console.log('Discord slash commands registered: /help, /model, /new, /archive, /automations, /queue, /status, /stop, /file, /answer.');
+    console.log('Discord slash commands registered: /help, /project, /task, /knowledge, /model, /new, /archive, /automations, /queue, /status, /stop, /file, /answer.');
     bridge = new Bridge(config, discord, rpc, store);
     void bridge.models.list().catch(() => {});
     bridge.attach();
