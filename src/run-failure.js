@@ -23,11 +23,13 @@ const reasons = {
   discordAccess: 'Bot nemá potřebný přístup k cíli v Discordu.',
   discordDeleted: 'Cílový kanál nebo vlákno již neexistuje.',
   restart: 'Bot se restartoval během rozpracovaného úkolu. Nejdříve ověř jeho stav.',
+  contextUnavailable: 'Uložený kontext Codexu není dostupný. Stav byl ověřen bez obnovení nebo opakování zadání.',
 };
 
 export function runFailure(error, phase, at = Date.now(), turnId = null) {
   const info = error?.codexErrorInfo ?? error?.codex_error_info;
-  let code = typeof info === 'string' ? info : Object.keys(info || {})[0];
+  let code = error?.rpcRejected && error.code === -32600 && /no rollout found for thread\b|thread not loaded\s*:/i.test(error.message || '')
+    ? 'contextUnavailable' : typeof info === 'string' ? info : Object.keys(info || {})[0];
   code = code?.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
   if (!reasons[code]) {
     code = phase === 'restart' ? 'restart' : [50001, 50013].includes(error?.code) ? 'discordAccess' :

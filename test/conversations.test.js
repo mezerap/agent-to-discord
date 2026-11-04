@@ -106,8 +106,9 @@ test('switching model during work does not interrupt, resume or replace the acti
   await f.bridge.control('model', 'gpt-luna', 'main', f.output);
   assert.equal(record.active, true);
   assert.equal(f.calls.length, before);
+  const resumesBeforeStatus = f.calls.filter(c => c.method === 'thread/resume').length;
   await f.bridge.control('status', '', 'main', f.output);
-  assert.equal(f.calls.filter(c => c.method === 'thread/resume').at(-1).params.model, undefined);
+  assert.equal(f.calls.filter(c => c.method === 'thread/resume').length, resumesBeforeStatus);
   await f.finish(record);
   await f.message('Next work');
   const turns = f.calls.filter(c => c.method === 'turn/start');

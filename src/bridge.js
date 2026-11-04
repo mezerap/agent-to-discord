@@ -241,6 +241,7 @@ export class Bridge {
       const turnInput = [...input, { type: 'text', text: FILE_CAPABILITIES + '\n' + this.contextNotes.reminder(record) }];
       const result = await this.rpc.call('turn/start', { threadId: record.codexId, input: turnInput, ...modelSettings, ...cwdSettings, ...(messageId ? { clientUserMessageId: messageId } : {}) });
       record.turnId = result.turn.id;
+      delete record.freshUnstarted;
       const run = this.store.state.schedules[record.scheduleId]?.runs?.find(item => item.id === record.automationRunId);
       if (record.runKind === 'scheduled' && run) run.turnId = result.turn.id;
       record.uncertain = false;
@@ -320,12 +321,34 @@ export class Bridge {
 
   async status(channel, record) {
     if (!record) return say(channel, 'Připraven. Napiš zprávu; odpovím v tomto kanálu nebo vlákně.');
-    const settings = this.threadSettings(record.discordId, record);
-    delete settings.cwd; // Status must not change a running turn's directory.
-    delete settings.model; // Inspecting status must not apply a pending model change to active work.
-    await this.rpc.call('thread/resume', { threadId: record.codexId, ...settings });
-    const thread = await this.cleanup.readThread(record.codexId);
+    let thread;
+    try {
+      thread = await this.cleanup.readThread(record.codexId);
+      const loadedState = thread.status?.type;
+      if (record.freshUnstarted && !thread.turns?.length && ['idle', 'notLoaded'].includes(loadedState)) {
+        const status = record.uncertain
+          ? 'výsledek prvního zadání je nejistý; zadání nebylo opakováno'
+          : 'čeká na první běh';
+        return say(channel, `Adresář: ${this.projects.settings(record.discordId, record).cwd}\nCodex: ${status}\nKonverzace: ${record.codexId}\n${this.idleContext.status(record)}`);
+      }
+      if (loadedState === 'notLoaded') {
+        const settings = this.threadSettings(record.discordId, record);
+        delete settings.cwd; // Status loads history without changing a running turn's directory.
+        delete settings.model; // Inspection must not apply a pending model change.
+        await this.rpc.call('thread/resume', { threadId: record.codexId, ...settings });
+        thread = await this.cleanup.readThread(record.codexId);
+      }
+    } catch (error) {
+      const failure = runFailure(error, 'status', Date.now(), record.turnId || null);
+      const message = record.freshUnstarted && record.uncertain
+        ? 'Výsledek prvního zadání je nejistý. Zadání nebylo zopakováno; ověř stav Codexu před novým pokusem.'
+        : record.freshUnstarted && failure.code === 'contextUnavailable'
+          ? 'Nový kontext čeká na první běh, který lze potvrdit pouze po přijetí zadání.'
+        : `${failureText(failure)}\nZadání nebylo obnoveno ani opakováno; ověř stav znovu později.`;
+      return say(channel, message);
+    }
     const last = thread.turns?.at(-1);
+    if (last) delete record.freshUnstarted;
     record.active = last?.status === 'inProgress';
     record.turnId = last?.id || null;
     record.uncertain = false;

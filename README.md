@@ -148,6 +148,8 @@ After a restart, an unfinished task **is not started again**. Use `!status` to c
 
 ### Scheduled tasks
 
+Fresh automation contexts are created only when their first scheduled or manual run is ready. The first turn starts directly: Codex does not persist an empty thread's rollout, so resuming it before that turn can fail. `/status` reads loaded contexts without resuming them and reports missing history safely. A failed or uncertain start never causes the bridge to recreate a context or replay the task automatically.
+
 Ask naturally, for example: “Every weekday at 9:00 Prague time, check the project and report the result here.” Codex calls the bridge's `discord_automation` tool to save the schedule. The saved prompt must include the task's details. Creation is reported only after persistence succeeds. The job receives an independent fork of the originating conversation after the scheduling turn finishes.
 
 Supported schedules are one-time ISO dates with an explicit offset, intervals in whole minutes, and five-field cron expressions with an IANA time zone (default `Europe/Prague`). The scheduler runs inside the bridge every 15 seconds; the bot/container must be running. A job submitted in the main channel delivers there; one submitted in a thread delivers in that thread. On your explicit request, an existing job can change its destination within the configured main channel and its threads. Results and clarification/approval requests use the same destination.

@@ -108,15 +108,94 @@ test('fresh-context job creates its own Codex thread with the saved workspace', 
   f.bridge.rpc.call = async (method, params) => {
     f.calls.push({ method, params });
     if (method === 'thread/start') return { thread: { id: 'fresh-codex' } };
+    if (method === 'thread/resume') throw Object.assign(new Error('no rollout found for zero-turn thread'), { code: -32600 });
     return {};
   };
   f.bridge.record = id => Object.values(f.bridge.store.state.threads).find(item => item.codexId === id);
+  f.bridge.startTurn = async (...args) => {
+    f.calls.push({ method: 'startTurn', args });
+    delete args[0].freshUnstarted;
+  };
   await f.scheduler.runDue();
   assert.equal(f.job.codexId, 'fresh-codex');
   assert.deepEqual(f.calls.find(call => call.method === 'thread/start').params, {
     cwd: '/workspace/sports', dynamicTools: ['tool'], model: 'gpt-sol',
   });
   assert.equal(f.calls.find(call => call.method === 'startTurn').args[0].codexId, 'fresh-codex');
+  assert.deepEqual(f.calls.find(call => call.method === 'startTurn').args[3], {
+    settings: { model: 'gpt-sol', effort: 'high' },
+  });
+  assert.equal(f.calls.some(call => call.method === 'thread/resume'), false);
+  assert.equal(f.bridge.record('fresh-codex').freshUnstarted, undefined);
+});
+
+test('fresh-context thread is not created before its first due or manual run', async () => {
+  const f = fixture({ jobOverrides: { contextMode: 'fresh', contextPending: true, codexId: undefined,
+    sourceId: undefined, nextRun: 20_000 } });
+
+  await f.scheduler.runDue();
+
+  assert.equal(f.job.contextPending, true);
+  assert.equal(f.job.codexId, undefined);
+  assert.equal(f.calls.some(call => call.method === 'thread/start'), false);
+  assert.equal(f.job.runs.length, 0);
+});
+
+test('fresh-context marker survives restart and ambiguous first-turn start without recreation', async () => {
+  const f = fixture({ jobOverrides: { contextMode: 'fresh', contextPending: true, codexId: undefined,
+    sourceId: undefined, nextRun: 20_000 } });
+  f.bridge.rpc.call = async (method, params) => {
+    f.calls.push({ method, params });
+    if (method === 'thread/start') return { thread: { id: 'fresh-codex' } };
+    if (method === 'thread/resume') throw Object.assign(new Error('no rollout found for zero-turn thread'), { code: -32600 });
+    return {};
+  };
+  await f.scheduler.prepare(f.job);
+  const record = f.bridge.record('fresh-codex');
+  assert.equal(record.freshUnstarted, true);
+
+  f.job.pendingRun = { id: 'manual-after-restart', requestedAt: 15_000 };
+  const restartedScheduler = new Scheduler(f.bridge, () => 16_000);
+  f.bridge.startTurn = async current => {
+    current.active = false;
+    current.uncertain = true;
+    throw new Error('connection lost while starting first turn');
+  };
+  await restartedScheduler.runDue();
+
+  assert.equal(f.calls.filter(call => call.method === 'thread/start').length, 1);
+  assert.equal(f.calls.some(call => call.method === 'thread/resume'), false);
+  assert.equal(f.job.status, 'attention');
+  assert.equal(record.freshUnstarted, true);
+  assert.equal(record.uncertain, true);
+  assert.equal(f.job.runs[0].failure.phase, 'start');
+});
+
+test('stale fresh preparation claim enters attention and cannot be bypassed by a manual run', async () => {
+  const f = fixture({ jobOverrides: { contextMode: 'fresh', contextPending: true, preparing: true,
+    codexId: undefined, sourceId: undefined, pendingRun: { id: 'manual', requestedAt: 9_500 } } });
+
+  await f.scheduler.runDue();
+
+  assert.equal(f.job.status, 'attention');
+  assert.equal(f.job.contextPending, true);
+  assert.equal(f.calls.some(call => call.method === 'thread/start'), false);
+  assert.equal(f.calls.some(call => call.method === 'thread/resume'), false);
+  assert.equal(f.calls.some(call => call.method === 'startTurn'), false);
+});
+
+test('missing saved automation context enters attention instead of creating a replacement', async () => {
+  const f = fixture({ jobOverrides: { codexId: 'missing-codex', contextPending: false } });
+  f.bridge.store.state.threads = {};
+  f.bridge.record = () => undefined;
+
+  await f.scheduler.runDue();
+
+  assert.equal(f.job.status, 'attention');
+  assert.equal(f.job.lastFailure.phase, 'context');
+  assert.equal(f.calls.some(call => call.method === 'thread/start'), false);
+  assert.equal(f.calls.some(call => call.method === 'thread/resume'), false);
+  assert.equal(f.calls.some(call => call.method === 'startTurn'), false);
 });
 
 test('failed resume claims once and a subsequent check never repeats the run', async () => {

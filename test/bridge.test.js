@@ -104,6 +104,97 @@ test('failed turns are reported as failure, not successful completion', async ()
   assert.equal(f.store.state.threads.thread.active, false);
 });
 
+test('status reads an empty fresh context without resuming or clearing its marker', async () => {
+  const f = fixture();
+  const record = { discordId: 'thread', codexId: 'fresh', active: false, turnId: null, uncertain: false, freshUnstarted: true };
+  f.store.state.threads.thread = record;
+  const rpcCalls = [];
+  f.bridge.rpc.call = async (method, params) => { rpcCalls.push({ method, params }); return {}; };
+  f.bridge.cleanup.readThread = async () => ({ status: { type: 'idle' }, turns: [] });
+  f.bridge.idleContext.status = () => 'Idle context';
+  f.bridge.handoff.show = async () => {};
+
+  await f.bridge.status(f.channel, record);
+
+  assert.deepEqual(rpcCalls, []);
+  assert.equal(record.freshUnstarted, true);
+  assert.equal(record.uncertain, false);
+  assert.match(f.messages.at(-1).content, /čeká na první běh/u);
+  f.bridge.close();
+});
+
+test('status distinguishes uncertain first-turn acceptance from an untouched fresh context', async () => {
+  const f = fixture();
+  const record = { discordId: 'thread', codexId: 'fresh', active: false, turnId: null, uncertain: true, freshUnstarted: true };
+  f.store.state.threads.thread = record;
+  f.bridge.cleanup.readThread = async () => ({ status: { type: 'notLoaded' }, turns: [] });
+  f.bridge.idleContext.status = () => 'Idle context';
+
+  await f.bridge.status(f.channel, record);
+
+  assert.equal(record.freshUnstarted, true);
+  assert.equal(record.uncertain, true);
+  assert.match(f.messages.at(-1).content, /nejistý/u);
+  assert.match(f.messages.at(-1).content, /nebylo opakováno/u);
+  f.bridge.close();
+});
+
+test('status resumes an unloaded established context before displaying its history', async () => {
+  const f = fixture();
+  const record = { discordId: 'thread', codexId: 'established', active: false, turnId: null, uncertain: true };
+  f.store.state.threads.thread = record;
+  const rpcCalls = [];
+  f.bridge.rpc.call = async (method, params) => { rpcCalls.push({ method, params }); return {}; };
+  let reads = 0;
+  f.bridge.cleanup.readThread = async () => ++reads === 1
+    ? { status: { type: 'notLoaded' }, turns: [] }
+    : { status: { type: 'idle' }, turns: [{ id: 'previous-turn', status: 'completed', items: [{ type: 'agentMessage', text: 'Previous answer' }] }] };
+  f.bridge.idleContext.status = () => 'Idle context';
+  f.bridge.handoff.show = async () => {};
+
+  await f.bridge.status(f.channel, record);
+
+  assert.deepEqual(rpcCalls.map(call => call.method), ['thread/resume']);
+  assert.equal(record.turnId, 'previous-turn');
+  assert.equal(record.uncertain, false);
+  assert.match(f.messages.at(-1).content, /Previous answer/u);
+  f.bridge.close();
+});
+
+test('status resolves an uncertain first start only after observing its persisted turn', async () => {
+  const f = fixture();
+  const record = { discordId: 'thread', codexId: 'fresh', active: false, turnId: null, uncertain: true, freshUnstarted: true };
+  f.store.state.threads.thread = record;
+  f.bridge.cleanup.readThread = async () => ({ status: { type: 'idle' },
+    turns: [{ id: 'accepted-turn', status: 'completed', items: [{ type: 'agentMessage', text: 'Confirmed answer' }] }] });
+  f.bridge.idleContext.status = () => 'Idle context';
+  f.bridge.handoff.show = async () => {};
+
+  await f.bridge.status(f.channel, record);
+
+  assert.equal(record.freshUnstarted, undefined);
+  assert.equal(record.uncertain, false);
+  assert.equal(record.turnId, 'accepted-turn');
+  assert.match(f.messages.at(-1).content, /Confirmed answer/u);
+  f.bridge.close();
+});
+
+test('status safely reports a missing fresh rollout without changing the pending context', async () => {
+  const f = fixture();
+  const record = { discordId: 'thread', codexId: 'fresh-secret-id', active: false, turnId: null, uncertain: true, freshUnstarted: true };
+  f.store.state.threads.thread = record;
+  f.bridge.cleanup.readThread = async () => { throw Object.assign(new Error('No rollout found for thread fresh-secret-id'), { rpcRejected: true, code: -32600 }); };
+
+  await f.bridge.status(f.channel, record);
+
+  assert.equal(record.freshUnstarted, true);
+  assert.equal(record.uncertain, true);
+  assert.ok(!f.messages.at(-1).content.includes('fresh-secret-id'));
+  assert.match(f.messages.at(-1).content, /nejistý/u);
+  assert.match(f.messages.at(-1).content, /nebylo zopakováno/u);
+  f.bridge.close();
+});
+
 test('RPC correlates responses and rejects outstanding requests on disconnect', async () => {
   const rpc = new CodexClient({});
   rpc.child = { stdin: { writable: true, write() {} } };

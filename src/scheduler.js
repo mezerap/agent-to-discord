@@ -244,6 +244,12 @@ export class Scheduler {
     if (!job.contextPending) return;
     if (job.contextMode === 'fresh') {
       if (job.preparing) { job.status = 'attention'; await b.store.save(); return; }
+      if (job.codexId) {
+        job.status = 'attention';
+        job.lastFailure = runFailure(new Error('Fresh automation context already has a Codex ID; it will not be recreated.'), 'context', this.now());
+        await b.store.save();
+        return;
+      }
       job.preparing = true;
       await b.store.save();
       if (job.workspace) await b.projects.resolveSettings(job.discordId, { workspace: job.workspace });
@@ -251,7 +257,8 @@ export class Scheduler {
         ...(job.execution?.model ? { model: job.execution.model } : {}) };
       const started = await b.rpc.call('thread/start', settings);
       const record = { codexId: started.thread.id, discordId: job.discordId, kind: 'automation', title: job.title,
-        active: false, scheduleId: job.id, tools: true, workspace: structuredClone(job.workspace ?? null) };
+        active: false, scheduleId: job.id, tools: true, freshUnstarted: true,
+        workspace: structuredClone(job.workspace ?? null) };
       b.store.state.threads[`automation:${job.id}`] = record;
       Object.assign(job, { codexId: record.codexId, contextPending: false, preparing: false });
       await b.store.save();
@@ -284,8 +291,10 @@ export class Scheduler {
       if (b.closing || job.status === 'deleted' || b.cleanup.isDeleted(job.discordId)) continue;
       await this.delivery.apply(job);
       const manual = Boolean(job.pendingRun);
+      const dueBeforePrepare = job.status === 'enabled' && job.nextRun && job.nextRun <= this.now();
       if (job.destinationError || (job.pendingDestination && !job.contextPending) ||
         (!manual && job.status !== 'enabled') || (manual && job.status === 'attention')) continue;
+      if (job.contextPending && job.contextMode === 'fresh' && !manual && !dueBeforePrepare) continue;
       if (b.queue?.has(job.discordId) || b.busy.has(job.discordId) || recordsAt(b, job.discordId).some(r => r.active || r.uncertain)) continue;
       b.busy.add(job.discordId);
       const release = b.cleanup.hold(job.discordId);
@@ -299,6 +308,12 @@ export class Scheduler {
         if (!channel) throw new Error('Missing destination');
         if (b.cleanup.isDeleted(job.discordId) || job.pendingDestination || (!manual && job.status !== 'enabled')) continue;
         const record = b.record(job.codexId);
+        if (!record && job.codexId) {
+          job.status = 'attention';
+          job.lastFailure = runFailure(new Error('Automation context is missing; it will not be recreated.'), 'context', this.now());
+          await b.store.save();
+          continue;
+        }
         if (!record || record.active || record.uncertain || record.retiring) continue;
         // Claim before execution so restart recovery never repeats a possibly sent prompt.
         const isManual = Boolean(job.pendingRun);
@@ -319,9 +334,11 @@ export class Scheduler {
         if (effectiveExecution?.model) run.execution = await this.validateExecution(effectiveExecution);
         phase = 'workspace';
         if (job.workspace) await b.projects.resolveSettings(record.discordId, { workspace: job.workspace });
-        phase = 'resume';
-        await b.rpc.call('thread/resume', { threadId: record.codexId, ...b.threadSettings(record.discordId, { ...record, workspace: job.workspace }),
-          ...(run.execution?.model ? { model: run.execution.model } : {}) });
+        if (!record.freshUnstarted) {
+          phase = 'resume';
+          await b.rpc.call('thread/resume', { threadId: record.codexId, ...b.threadSettings(record.discordId, { ...record, workspace: job.workspace }),
+            ...(run.execution?.model ? { model: run.execution.model } : {}) });
+        }
         phase = 'start';
         run.status = 'running';
         await b.store.save();

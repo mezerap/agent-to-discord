@@ -11,3 +11,13 @@ test('structured failures normalize protocol names and do not expose raw provide
   assert.equal(runFailure({ codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 503 } } }, 'turn').code, 'responseStreamDisconnected');
   assert.equal(runFailure({ message: 'SECRET', codexErrorInfo: 'unrecognized' }, 'turn').code, 'unknown');
 });
+
+test('classifies a missing Codex rollout without exposing its diagnostic text', () => {
+  const failure = runFailure({ rpcRejected: true, code: -32600, message: 'No rollout found for thread SECRET_THREAD' }, 'status');
+
+  assert.equal(failure.code, 'contextUnavailable');
+  assert.match(failure.message, /kontext Codexu není dostupný/u);
+  assert.ok(!JSON.stringify(failure).includes('SECRET_THREAD'));
+  assert.equal(runFailure({ rpcRejected: true, code: -32600, message: 'thread not loaded: SECRET_THREAD' }, 'status').code, 'contextUnavailable');
+  assert.equal(runFailure({ rpcRejected: true, code: -32600, message: 'Invalid request SECRET' }, 'status').code, 'unknown');
+});
