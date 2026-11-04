@@ -214,6 +214,39 @@ test('manual thread forks through the starter turn and excludes later conversati
   assert.equal(f.histories.get(f.state.threads[starter.id].codexId).turns.length, 2);
 });
 
+test('context epoch prevents automatic quote or fork of a pre-reset thread starter', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  await f.message('Tracked parent turn');
+  const parent = f.state.threads.main;
+  await f.finish(parent);
+  const epoch = Date.now();
+  f.state.contextEpoch = epoch;
+  f.channels.set('old-thread', f.channel('old-thread'));
+  f.state.messages['old-thread'] = { codexId: parent.codexId, discordId: 'main', turnId: parent.turnId };
+  f.messages.set('old-thread', { id: 'old-thread', author: { id: 'owner' }, content: 'Old starter content', createdTimestamp: epoch - 1 });
+
+  await f.message('Fresh request', 'old-thread');
+
+  assert.ok(!f.calls.some(call => call.method === 'thread/fork'));
+  const input = f.calls.filter(call => call.method === 'turn/start').at(-1).params.input;
+  assert.ok(JSON.stringify(input).includes('Fresh request'));
+  assert.ok(!JSON.stringify(input).includes('Old starter content'));
+});
+
+test('context epoch still imports a newly created user starter', async t => {
+  const f = fixture(); t.after(() => f.bridge.close());
+  const epoch = Date.now();
+  f.state.contextEpoch = epoch;
+  f.channels.set('new-thread', f.channel('new-thread'));
+  f.messages.set('new-thread', { id: 'new-thread', author: { id: 'owner' }, content: 'New starter content', createdTimestamp: epoch });
+
+  await f.message('Fresh request', 'new-thread');
+
+  const input = f.calls.find(call => call.method === 'turn/start').params.input;
+  assert.ok(JSON.stringify(input).includes('New starter content'));
+  assert.ok(!f.calls.some(call => call.method === 'thread/fork'));
+});
+
 test('new archives only the current conversation and old replies do not resume it', async t => {
   const f = fixture(); t.after(() => f.bridge.close());
   await f.message('Old'); const old = f.state.threads.main; await f.finish(old);

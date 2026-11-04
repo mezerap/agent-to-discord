@@ -312,7 +312,7 @@ Suggested layout:
 
 ```text
 /workspace/
-  projects/       # canonical projects (legacy aliases can remain)
+  projects/       # explicitly configured canonical projects
   worktrees/      # isolated Git task checkouts
   knowledge/      # explicit project notes, sources and dates
   artifacts/      # review packages and incident evidence
@@ -346,6 +346,8 @@ Authenticated changes reuse an incident thread per source/resource; repeated ide
 
 `ops/coolify-events.py` is an optional host-side health sampler. Its private config contains `bridge_state_dir` (host volume path) and an allowlist of `containers`. Run from a protected service/timer on the host; it reads Docker state, signs transitions, and writes the spool. A healthy first sample is silent. It does not expose Docker to the agent. Other n8n/GitHub producers may use the same signed contract; they require separately configured verified source credentials/routing. This package does not automatically install workflows or public webhooks.
 
-## Operator migration
+## Clean start
 
-`src/platform-migration.js` provides an explicit, tested migration helper for a stopped bridge. It archives old schedule definitions, creates fresh conversations for active recurring tasks, preserves their instructions/cadence/destination, and pins verified settings with explicit project mapping. Paused/completed schedules stay archived. It refuses active/uncertain work, pending context creation and unmapped tasks, and cannot run twice. Application startup never silently reorganizes project files or rebuilds schedules. Stop the application through its deployment manager before updating state; keep legacy path aliases until all external references have been migrated. User data and dirty checkouts must be preserved.
+For a genuinely new installation, stop the bridge and prepare an empty workspace before starting it again. Start with a fresh private `state.json`: no old thread IDs, destinations, model preferences, context plans, task records, incident history, or schedules. Set `contextEpoch` to the reset time so an existing Discord thread's older starter message is not automatically quoted or forked into new context; newly created starters at or after the epoch keep the normal behavior. Register only the new `operations` project in the `projects` allowlist; leave `schedules` empty so no automation runs until it is explicitly created later. Do not migrate or archive old schedule definitions.
+
+Keep the bridge's authentication and runtime configuration. If incident monitoring is enabled, retain its private `events.json` signing configuration and recreate event sources against the new `operations` project and destination. The workspace itself should contain no old project files, worktrees, knowledge notes, artifacts, or cached context. Ordinary archive and retention features remain available for conversations created after the reset.

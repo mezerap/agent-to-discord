@@ -10,8 +10,8 @@ export function initializeState(state) {
   state.contextSeeds ??= {};
   state.contextPlans ??= {};
   state.modelPreferences ??= {};
-  for (const key of ['projects', 'destinations', 'tasks', 'incidents', 'eventReceipts', 'scheduleArchive']) state[key] ??= {};
-  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans', 'modelPreferences', 'projects', 'destinations', 'tasks', 'incidents', 'eventReceipts', 'scheduleArchive']) {
+  for (const key of ['projects', 'destinations', 'tasks', 'incidents', 'eventReceipts']) state[key] ??= {};
+  for (const key of ['threads', 'retiredThreads', 'messages', 'schedules', 'toolResults', 'freshChannels', 'queuedMessages', 'queuePaused', 'contextSeeds', 'contextPlans', 'modelPreferences', 'projects', 'destinations', 'tasks', 'incidents', 'eventReceipts']) {
     if (!state[key] || typeof state[key] !== 'object' || Array.isArray(state[key])) throw new Error(`Invalid ${key} state.`);
   }
 }
@@ -27,6 +27,15 @@ export function recordsAt(bridge, channelId) {
 
 export function recordKey(bridge, record) {
   return Object.keys(bridge.store.state.threads).find(key => bridge.store.state.threads[key] === record);
+}
+
+function timestamp(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 export function forgetMessages(state, codexId) {
@@ -70,8 +79,17 @@ export async function createConversation(bridge, channel, text) {
       // A standalone thread has a ThreadCreated system notice, not a context-bearing message.
       // Check even mapped starters: older versions mistakenly processed these notices as prompts.
       if (starter.system) source = null;
-      else if (!source && [bridge.config.userId, bridge.discord.user?.id].includes(starter.author?.id)) quote = starter.content;
-    } catch (error) { if (![10008, 10003].includes(error.code)) throw error; }
+      else {
+        const epoch = timestamp(bridge.store.state.contextEpoch);
+        const created = timestamp(starter.createdTimestamp);
+        const canAdoptStarter = bridge.store.state.contextEpoch == null || (epoch !== null && created !== null && created >= epoch);
+        if (!canAdoptStarter) source = null;
+        else if (!source && [bridge.config.userId, bridge.discord.user?.id].includes(starter.author?.id)) quote = starter.content;
+      }
+    } catch (error) {
+      if (![10008, 10003].includes(error.code)) throw error;
+      if (bridge.store.state.contextEpoch != null) source = null;
+    }
   }
   if (!bridge.store.state.destinations[channel.id] && source) {
     const workspace = bridge.workspaceSnapshot(source.discordId, bridge.record(source.codexId));
