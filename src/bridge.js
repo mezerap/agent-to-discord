@@ -569,7 +569,15 @@ export class Bridge {
     if (this.cleanup.isDeleted(record.discordId) || record.retiring) return;
     try {
       const channel = await this.discord.channels.fetch(record.discordId);
-      const content = record.kind === 'automation' ? `**${record.title}**\n${text}` : text;
+      const run = record.runKind === 'scheduled' && this.store.state.schedules[record.scheduleId]?.runs?.find(item => item.id === record.automationRunId);
+      const showHeading = record.kind === 'automation' && !run?.headingStarted;
+      if (run && showHeading) {
+        // Claim before sending: an ambiguous Discord response must not repeat the heading.
+        run.headingStarted = true;
+        await this.store.save();
+      }
+
+      const content = showHeading ? `**${record.title}**\n${text}` : text;
       await say({ send: async payload => {
         const message = await channel.send(payload);
         await rememberMessage(this, message?.id, record, turnId);
