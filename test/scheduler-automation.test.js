@@ -207,6 +207,64 @@ test('failed resume claims once and a subsequent check never repeats the run', a
   assert.equal(f.job.runs[0].status, 'failed');
 });
 
+test('a successful re-enabled run clears the stale current failure and retains run history', async () => {
+  const f = fixture({ jobOverrides: { status: 'attention', lastFailure: { code: 'contextUnavailable', phase: 'resume', at: 9_000 },
+    runs: [{ id: 'failed-run', status: 'failed', failure: { code: 'contextUnavailable', phase: 'resume', at: 9_000 } }] } });
+  const oldFailure = structuredClone(f.job.runs[0].failure);
+  await f.scheduler.setStatus('job', 'enabled');
+  const run = { id: 'successful-run', status: 'running', turnId: 'turn-success' };
+  f.job.runs.unshift(run);
+  Object.assign(f.record, { runKind: 'scheduled', automationRunId: run.id, turnId: run.turnId });
+
+  const completed = await f.scheduler.completeRun(f.record, { id: 'turn-success', status: 'completed' });
+
+  assert.equal(completed, run);
+  assert.equal(run.status, 'completed');
+  assert.equal(f.job.lastFailure, undefined);
+  assert.deepEqual(f.job.runs[1].failure, oldFailure);
+});
+
+test('a failed matching run replaces lastFailure instead of clearing it', async () => {
+  const f = fixture({ jobOverrides: { status: 'enabled', lastFailure: { code: 'oldFailure', phase: 'resume', at: 8_000 } } });
+  const run = { id: 'failed-run', status: 'running', turnId: 'turn-failed' };
+  f.job.runs.unshift(run);
+  Object.assign(f.record, { runKind: 'scheduled', automationRunId: run.id, turnId: run.turnId });
+
+  await f.scheduler.completeRun(f.record, { id: 'turn-failed', status: 'failed', error: { codexErrorInfo: 'serverOverloaded' } });
+
+  assert.equal(f.job.status, 'attention');
+  assert.equal(f.job.lastFailure.code, 'serverOverloaded');
+  assert.deepEqual(run.failure, f.job.lastFailure);
+});
+
+test('a completion for a different turn cannot clear lastFailure or finish the current run', async () => {
+  const staleFailure = { code: 'contextUnavailable', phase: 'resume', at: 9_000 };
+  const f = fixture({ jobOverrides: { status: 'enabled', lastFailure: staleFailure } });
+  const run = { id: 'current-run', status: 'running', turnId: 'expected-turn' };
+  f.job.runs.unshift(run);
+  Object.assign(f.record, { runKind: 'scheduled', automationRunId: run.id, turnId: run.turnId });
+
+  const completed = await f.scheduler.completeRun(f.record, { id: 'different-turn', status: 'completed' });
+
+  assert.equal(completed, null);
+  assert.equal(f.job.lastFailure, staleFailure);
+  assert.equal(run.status, 'running');
+});
+
+test('a completion without a turn ID cannot clear lastFailure', async () => {
+  const staleFailure = { code: 'contextUnavailable', phase: 'resume', at: 9_000 };
+  const f = fixture({ jobOverrides: { status: 'enabled', lastFailure: staleFailure } });
+  const run = { id: 'current-run', status: 'running', turnId: 'expected-turn' };
+  f.job.runs.unshift(run);
+  Object.assign(f.record, { runKind: 'scheduled', automationRunId: run.id, turnId: run.turnId });
+
+  const completed = await f.scheduler.completeRun(f.record, { status: 'completed' });
+
+  assert.equal(completed, run);
+  assert.equal(run.status, 'completed');
+  assert.equal(f.job.lastFailure, staleFailure);
+});
+
 test('run result writes require the current active scheduled turn', async () => {
   const f = fixture({ recordOverrides: { active: false, automationRunId: 'old-run', runKind: 'user' } });
   f.job.runs = [{ id: 'old-run', status: 'completed' }];

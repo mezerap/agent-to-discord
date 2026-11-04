@@ -37,7 +37,16 @@ def inspect(args, **kwargs):
     assert args[:4] == ['docker', 'inspect', '--format', '{{json .State}}']
     assert kwargs['timeout'] == 15
     condition = next(conditions)
-    state = {'Status': condition, 'Health': {'Status': condition}, 'ExitCode': 0, 'OOMKilled': False}
+    if isinstance(condition, dict):
+        state = condition
+    elif condition == 'running':
+        state = {'Status': 'running'}
+    elif condition in ('healthy', 'unhealthy', 'starting'):
+        state = {'Status': 'running', 'Health': {'Status': condition}}
+    else:
+        state = {'Status': condition, 'Health': {'Status': 'healthy'}}
+    state.setdefault('ExitCode', 0)
+    state.setdefault('OOMKilled', False)
     return SimpleNamespace(returncode=0, stdout=json.dumps(state, ensure_ascii=False))
 module['subprocess'].run = inspect
 module['os'].chown = lambda path, uid, gid: chowns.append((str(path), uid, gid))
@@ -108,6 +117,22 @@ test('starting preserves a reported problem until the resource genuinely recover
   assert.deepEqual(JSON.parse(await readFile(join(dirname(config), 'event-monitor-state.json'), 'utf8')), { 'api-service-1': 'healthy' });
 });
 
+test('non-running container lifecycle overrides stale healthy health status', { skip: !pythonAvailable }, async t => {
+  for (const lifecycle of ['paused', 'exited', 'dead', 'restarting']) {
+    const { config, spool } = await fixture(t);
+    runMonitor(config, [
+      'healthy',
+      { Status: lifecycle, Health: { Status: 'healthy' }, ExitCode: 0, OOMKilled: false },
+    ]);
+
+    const files = await readdir(spool);
+    assert.equal(files.length, 1, `${lifecycle} should produce one problem event`);
+    const notification = JSON.parse(await readFile(join(spool, files[0]), 'utf8'));
+    assert.equal(notification.status, 'problem', `${lifecycle} must not be treated as healthy`);
+    assert.match(notification.summary, new RegExp(`healthy -> ${lifecycle}`, 'u'));
+  }
+});
+
 test('producer passes configured container names as one inspect argument, never through a shell', { skip: !pythonAvailable }, async t => {
   const { config } = await fixture(t);
   const harness = String.raw`
@@ -118,7 +143,7 @@ config_path = sys.argv[2]
 seen = []
 def inspect(args, **kwargs):
     seen.append(args)
-    return SimpleNamespace(returncode=0, stdout='{"Status":"healthy"}')
+    return SimpleNamespace(returncode=0, stdout='{"Status":"running","Health":{"Status":"healthy"}}')
 module['subprocess'].run = inspect
 module['os'].chown = lambda *args: None
 module['os'].fchown = lambda *args: None

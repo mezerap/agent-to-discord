@@ -102,7 +102,12 @@ def main():
                 state = {}
             else:
                 state = json.loads(result.stdout)
-                condition = state.get('Health', {}).get('Status', state.get('Status', 'unknown'))
+                container_status = state.get('Status', 'unknown')
+                if container_status != 'running':
+                    condition = container_status
+                else:
+                    health = state.get('Health')
+                    condition = health.get('Status', 'running') if isinstance(health, dict) else 'running'
             good = condition in ('healthy', 'running')
             old = previous.get(name)
             if condition == 'starting':

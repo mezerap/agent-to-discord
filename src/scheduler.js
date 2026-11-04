@@ -167,6 +167,8 @@ export class Scheduler {
     if (run && run.status === 'failed') {
       job.status = 'attention';
       job.lastFailure = run.failure;
+    } else if (run?.status === 'completed' && turn?.id) {
+      delete job.lastFailure;
     }
     await this.bridge.store.save();
     return run;
