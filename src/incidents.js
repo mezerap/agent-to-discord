@@ -35,7 +35,7 @@ export class Incidents {
     const b = this.bridge;
     if (b.closing) throw new Error('Bridge is closing.');
     if (event.destination !== b.config.channelId) throw new Error('Invalid incident destination.');
-    const project = b.projects.getProject(event.projectId);
+    b.projects.getProject(event.projectId);
     const id = createHash('sha256').update(`${event.source}:${event.resource}`).digest('hex').slice(0, 32);
     const fingerprint = createHash('sha256').update(`${event.status}\0${event.summary}`).digest('hex');
     let incident = b.store.state.incidents[id];
@@ -46,22 +46,17 @@ export class Incidents {
     incident.event = event;
     incident.fingerprint = fingerprint;
     incident.updatedAt = Date.now();
-    incident.delivery = incident.discordId ? 'sending' : 'creating';
+    incident.delivery = 'sending';
     await b.store.save();
     try {
-      if (!incident.discordId) {
-        const parent = await b.discord.channels.fetch(b.config.channelId);
-        const thread = await parent.threads.create({ name: `incident-${event.resource}`.slice(0, 90), type: ChannelType.PublicThread, autoArchiveDuration: 1440 });
-        incident.discordId = thread.id;
-        incident.delivery = 'sending';
-        b.store.state.destinations[thread.id] = { projectId: event.projectId, cwd: project.path, agent: 'primary' };
-        await b.store.save();
+      const channel = await b.discord.channels.fetch(b.config.channelId, { force: true });
+      if (channel?.id !== b.config.channelId || channel.guildId !== b.config.guildId || channel.type !== ChannelType.GuildText) {
+        throw new Error('Configured incident destination is unavailable.');
       }
-      const thread = await b.discord.channels.fetch(incident.discordId, { force: true });
-      if (!thread?.isThread?.() || thread.guildId !== b.config.guildId || thread.parentId !== b.config.channelId || thread.locked || b.cleanup.isDeleted(thread.id)) throw new Error('Incident thread is unavailable.');
-      if (thread.archived) await thread.setArchived(false);
-      const file = await this.artifact(id, event);
-      await say(thread, `**${event.resource}: ${event.status}**\n${event.summary}\n\nZdroj: ${event.source} · <t:${Math.floor(Date.parse(event.occurredAt) / 1000)}:f>\nOvěřený vstup je uložený v ${file}. Model se automaticky nespustil; další diagnostiku můžeš zadat zprávou v tomto vlákně.`);
+      await this.artifact(id, event);
+      const summary = event.summary.length > 1200 ? `${event.summary.slice(0, 1199)}…` : event.summary;
+      const status = event.status === 'problem' ? 'problém' : event.status === 'recovered' ? 'obnoveno' : event.status;
+      await say(channel, `**${event.resource}: ${status}**\n${summary}\nZdroj: ${event.source} · <t:${Math.floor(Date.parse(event.occurredAt) / 1000)}:f>`);
       incident.delivery = 'sent';
       await b.store.save();
     } catch (error) {
