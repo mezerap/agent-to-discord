@@ -43,6 +43,8 @@ test('scheduled run snapshots and revalidates its pinned model and effort before
   assert.deepEqual(started[3], { settings: { model: 'gpt-sol', effort: 'high' } });
   assert.deepEqual(f.job.runs[0].execution, { model: 'gpt-sol', effort: 'high' });
   assert.equal(f.job.runs[0].notificationMode, 'always');
+  const metadata = started[1][0].text.match(/Bridge metadata pro evidenci souborů .*: (\{[^\n]+\})/);
+  assert.deepEqual(JSON.parse(metadata[1]), { automationId: 'job', runId: f.job.runs[0].id });
   assert.equal(f.job.nextRun, 3_610_000);
 });
 

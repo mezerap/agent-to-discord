@@ -986,6 +986,22 @@ test('native file tool sends complete bytes and maps attachment replies to the s
   assert.equal(f.sent.filter(m => m.files).length, 1);
 });
 
+test('file tool can send to its archived unlocked current thread', async t => {
+  const f = await fileFixture(t); await f.message('Send report', 'thread'); const r = f.state.threads.thread;
+  f.channels.set('thread', { ...f.channel('thread'), archived: true, locked: false });
+
+  assert.equal((await requestFile(f, r)).success, true);
+  assert.equal(f.sent.at(-1).channelId, 'thread');
+});
+
+test('file tool cannot send to a locked archived current thread', async t => {
+  const f = await fileFixture(t); await f.message('Send report', 'thread'); const r = f.state.threads.thread;
+  f.channels.set('thread', { ...f.channel('thread'), archived: true, locked: true });
+
+  assert.equal((await requestFile(f, r)).success, false);
+  assert.equal(f.sent.filter(message => message.files).length, 0);
+});
+
 test('legacy scheduled file delivery stays in each job destination and does not edit schedules', async t => {
   for (const channelId of ['main', 'thread']) {
     const f = await fileFixture(t), job = await createJob(f, channelId);

@@ -2,15 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Bridge } from '../src/bridge.js';
 
-function fixture({ deliveryFails = false } = {}) {
+function fixture({ deliveryFails = false, notificationMode = 'change' } = {}) {
   const messages = [];
   const channel = { id: 'thread', send: async message => { messages.push(message); return { id: `message-${messages.length}` }; } };
   const run = { id: 'run-1', kind: 'scheduled', status: 'running', startedAt: 10, turnId: 'turn-1',
-    notificationMode: 'change', deliveryStatus: 'pending' };
+    notificationMode, deliveryStatus: 'pending' };
   const record = { discordId: 'thread', codexId: 'codex', kind: 'automation', scheduleId: 'job', runKind: 'scheduled',
     automationRunId: run.id, active: true, turnId: 'turn-1' };
   const state = { threads: { 'automation:job': record }, schedules: { job: { id: 'job', discordId: 'thread', status: 'enabled',
-    notificationMode: 'change', runs: [run] } }, toolResults: {}, modelPreferences: {} };
+    notificationMode, runs: [run] } }, toolResults: {}, modelPreferences: {} };
   const store = { state, save: async () => {} };
   const discord = { channels: { fetch: async () => channel }, user: { id: 'bot' } };
   const bridge = new Bridge({ guildId: 'guild', channelId: 'main', userId: 'owner', workspace: '/workspace' }, discord, { call: async () => ({}) }, store);
@@ -74,4 +74,32 @@ test('failed result delivery is marked unknown and never retried automatically',
   assert.equal(f.messages.length, 0);
   assert.equal(f.run.deliveryStatus, 'unknown');
   assert.equal(f.bridge.store.state.schedules.job.lastNotifiedSignature, undefined);
+});
+
+test('always delivery records the timestamp of the latest confirmed message in a multi-message run', async () => {
+  const f = fixture({ notificationMode: 'always' });
+  let now = 100;
+  f.bridge.scheduler.now = () => now;
+  await f.bridge.notification({ method: 'item/completed', params: { threadId: 'codex', turnId: 'turn-1', item: { type: 'agentMessage', text: 'Report part one' } } });
+  now = 200;
+  await f.bridge.notification({ method: 'item/completed', params: { threadId: 'codex', turnId: 'turn-1', item: { type: 'agentMessage', text: 'Report part two' } } });
+  await complete(f.bridge, f.record, f.run);
+
+  const history = f.bridge.scheduler.history('thread', 'job').runs[0];
+  assert.equal(history.status, 'completed');
+  assert.equal(history.deliveryStatus, 'sent');
+  assert.equal(history.deliveredAt, 200);
+});
+
+test('unknown message delivery cannot become a confirmed full-report timestamp later in the same run', async () => {
+  const f = fixture({ deliveryFails: true, notificationMode: 'always' });
+  let now = 100;
+  f.bridge.scheduler.now = () => now;
+  await assert.rejects(f.bridge.notification({ method: 'item/completed', params: { threadId: 'codex', turnId: 'turn-1', item: { type: 'agentMessage', text: 'All clear' } } }));
+  now = 200;
+  await f.bridge.notification({ method: 'item/completed', params: { threadId: 'codex', turnId: 'turn-1', item: { type: 'agentMessage', text: 'Follow-up delivered' } } });
+
+  const history = f.bridge.scheduler.history('thread', 'job').runs[0];
+  assert.equal(history.deliveryStatus, 'unknown');
+  assert.equal(history.deliveredAt, null);
 });

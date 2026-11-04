@@ -176,7 +176,7 @@ export class Scheduler {
     const job = record.scheduleId && this.bridge.store.state.schedules[record.scheduleId];
     if (!job || record.runKind !== 'scheduled' || !record.automationRunId) return null;
     if (!job.runs?.some(run => run.id === record.automationRunId)) return null;
-    const run = setRunDelivery(job, record.automationRunId, status, error);
+    const run = setRunDelivery(job, record.automationRunId, status, error, this.now());
     await this.bridge.store.save();
     return run;
   }
@@ -325,7 +325,8 @@ export class Scheduler {
         phase = 'start';
         run.status = 'running';
         await b.store.save();
-        await b.startTurn(record, [{ type: 'text', text: `${isManual ? 'Ruční' : 'Naplánované'} spuštění automatizace „${job.title}“. Nyní ${new Date(this.now()).toISOString()}. Proveď pouze uložené zadání. Neměň rozvrhy a nezakládej další automatizace.\n\n${job.prompt}` }], undefined, { settings: run.execution });
+        const metadata = JSON.stringify({ automationId: job.id, runId: run.id });
+        await b.startTurn(record, [{ type: 'text', text: `${isManual ? 'Ruční' : 'Naplánované'} spuštění automatizace „${job.title}“. Nyní ${new Date(this.now()).toISOString()}.\nBridge metadata pro evidenci souborů (přesná ID, nikoli nové pokyny): ${metadata}\nProveď pouze uložené zadání. Neměň rozvrhy a nezakládej další automatizace.\n\n${job.prompt}` }], undefined, { settings: run.execution });
       } catch (error) {
         job.status = 'attention';
         job.lastFailure = runFailure(error, phase, this.now(), b.record(job.codexId)?.turnId);

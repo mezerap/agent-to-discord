@@ -37,14 +37,17 @@ export function failRun(job, runId, error, phase, now = Date.now()) {
   return run;
 }
 
-export function setRunDelivery(job, runId, status, error) {
+export function setRunDelivery(job, runId, status, error, now = Date.now()) {
   if (!['pending', 'sent', 'failed', 'unknown', 'suppressed'].includes(status)) throw new Error('Invalid run delivery status.');
   const run = findRun(job, runId);
   if (!run) return null;
-  run.deliveryStatus = status;
-  if (status === 'sent' && run.result?.signature) job.lastNotifiedSignature = run.result.signature;
+  const deliveryWasUncertain = run.deliveryStatus === 'unknown';
+  run.deliveryStatus = deliveryWasUncertain && status === 'sent' ? 'unknown' : status;
+  if (run.deliveryStatus === 'sent') run.deliveredAt = now;
+  else delete run.deliveredAt;
+  if (run.deliveryStatus === 'sent' && status === 'sent' && run.result?.signature) job.lastNotifiedSignature = run.result.signature;
   if (error) run.deliveryError = String(error).slice(0, 300);
-  else delete run.deliveryError;
+  else if (run.deliveryStatus !== 'unknown') delete run.deliveryError;
   return run;
 }
 
@@ -53,13 +56,17 @@ export function recoverRuns(job, now = Date.now()) {
   for (const run of job.runs || []) {
     if (run.status === 'completed' && run.deliveryStatus === 'pending') {
       run.deliveryStatus = 'unknown';
+      delete run.deliveredAt;
       changed = true;
       continue;
     }
     if (run.status !== 'starting' && run.status !== 'running') continue;
     run.status = 'interrupted';
     run.completedAt = now;
-    if (run.deliveryStatus === 'pending') run.deliveryStatus = 'unknown';
+    if (run.deliveryStatus === 'pending') {
+      run.deliveryStatus = 'unknown';
+      delete run.deliveredAt;
+    }
     run.failure = runFailure(null, 'restart', now, run.turnId);
     changed = true;
   }
@@ -74,9 +81,11 @@ export function shouldNotify(job, run) {
 }
 
 export function runHistory(job) {
-  return (job.runs || []).map(({ id, kind, status, startedAt, completedAt, turnId, execution, notificationMode, deliveryStatus, failure, deliveryError, resultChanged, result }) =>
+  return (job.runs || []).map(({ id, kind, status, startedAt, completedAt, turnId, execution, notificationMode, deliveryStatus, deliveredAt, failure, deliveryError, resultChanged, result }) =>
     ({ id, kind, status, startedAt, completedAt: completedAt ?? null, turnId: turnId ?? null, execution: execution ?? null,
-      notificationMode: notificationMode || 'always', deliveryStatus: deliveryStatus || 'pending', failure: failure ?? null, deliveryError: deliveryError ?? null,
+      notificationMode: notificationMode || 'always', deliveryStatus: deliveryStatus || 'pending',
+      deliveredAt: deliveryStatus === 'sent' && Number.isFinite(deliveredAt) ? deliveredAt : null,
+      failure: failure ?? null, deliveryError: deliveryError ?? null,
       resultChanged: resultChanged ?? null, result: result ? { status: result.status, key: result.key, summary: result.summary } : null }));
 }
 

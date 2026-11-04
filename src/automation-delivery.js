@@ -5,7 +5,7 @@ import { PermissionFlagsBits } from 'discord.js';
 export class AutomationDelivery {
   constructor(bridge) { this.bridge = bridge; }
 
-  async destination(value, currentId) {
+  async destination(value, currentId, { allowArchivedCurrent = false } = {}) {
     const b = this.bridge;
     const id = value === 'main' ? b.config.channelId : value === 'here' ? currentId : String(value).replace(/^<#(\d+)>$/, '$1');
     if (b.cleanup.isDeleted(id)) throw new Error('Cílové vlákno bylo smazáno.');
@@ -16,7 +16,8 @@ export class AutomationDelivery {
     }
     const permissions = channel.permissionsFor(b.discord.user);
     const send = channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages;
-    if (channel.archived || channel.locked || !permissions?.has([PermissionFlagsBits.ViewChannel, send, PermissionFlagsBits.ReadMessageHistory])) {
+    const archivedCurrentThread = allowArchivedCurrent && id === currentId && channel.isThread() && channel.archived && !channel.locked;
+    if ((channel.archived && !archivedCurrentThread) || channel.locked || !permissions?.has([PermissionFlagsBits.ViewChannel, send, PermissionFlagsBits.ReadMessageHistory])) {
       throw new Error('Cíl musí být otevřený a bot v něm musí mít právo číst a psát.');
     }
     return id;

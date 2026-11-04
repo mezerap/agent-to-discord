@@ -50,7 +50,7 @@ export class FileDelivery {
       if (!run.result) throw new Error('Nejprve ověř výsledek přes discord_result. Přílohy se v tichém režimu posílají pouze při změně.');
       if (run.resultChanged === false) return { status: 'suppressed', reason: 'Výsledek kontroly se nezměnil; příloha nebyla odeslána.' };
     }
-    await b.scheduler.delivery.destination(record.discordId, record.discordId);
+    await b.scheduler.delivery.destination(record.discordId, record.discordId, { allowArchivedCurrent: true });
     const channel = await b.discord.channels.fetch(record.discordId);
     if (!channel.permissionsFor(b.discord.user)?.has(PermissionFlagsBits.AttachFiles)) throw new Error('Bot nemá v cíli oprávnění Attach Files.');
     let file;
