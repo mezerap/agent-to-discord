@@ -104,9 +104,16 @@ def main():
                 state = json.loads(result.stdout)
                 condition = state.get('Health', {}).get('Status', state.get('Status', 'unknown'))
             good = condition in ('healthy', 'running')
-            current[name] = condition
             old = previous.get(name)
-            if condition == old or (old is None and good) or condition == 'starting':
+            if condition == 'starting':
+                # Startup is transient: keep the last stable/problem state so
+                # an already-reported outage still produces a real recovery.
+                if old is not None:
+                    current[name] = old
+                continue
+            current[name] = condition
+            old_good = old in ('healthy', 'running')
+            if condition == old or (good and (old is None or old == 'starting' or old_good)):
                 continue
             event = {'id': str(uuid.uuid4()), 'source': 'coolify', 'resource': name,
                      'occurredAt': datetime.now(timezone.utc).isoformat(),

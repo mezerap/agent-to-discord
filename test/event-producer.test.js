@@ -75,6 +75,39 @@ test('Coolify producer stays silent on healthy baseline and repeats, then signs 
   assert.deepEqual(JSON.parse(await readFile(join(dirname(config), 'event-monitor-state.json'), 'utf8')), { 'api-service-1': 'healthy' });
 });
 
+test('startup and healthy/running aliases do not create a recovery incident', { skip: !pythonAvailable }, async t => {
+  const { config, spool } = await fixture(t);
+  const state = join(dirname(config), 'event-monitor-state.json');
+
+  runMonitor(config, ['starting', 'healthy', 'starting', 'starting', 'healthy', 'running', 'healthy']);
+
+  assert.deepEqual(await readdir(spool), []);
+  assert.deepEqual(JSON.parse(await readFile(state, 'utf8')), { 'api-service-1': 'healthy' });
+});
+
+test('legacy starting baseline silently becomes healthy', { skip: !pythonAvailable }, async t => {
+  const { config, spool } = await fixture(t);
+  await writeFile(join(dirname(config), 'event-monitor-state.json'), JSON.stringify({ 'api-service-1': 'starting' }));
+
+  runMonitor(config, ['healthy']);
+
+  assert.deepEqual(await readdir(spool), []);
+  assert.deepEqual(JSON.parse(await readFile(join(dirname(config), 'event-monitor-state.json'), 'utf8')), { 'api-service-1': 'healthy' });
+});
+
+test('starting preserves a reported problem until the resource genuinely recovers', { skip: !pythonAvailable }, async t => {
+  const { config, spool } = await fixture(t);
+
+  runMonitor(config, ['unhealthy', 'starting', 'healthy']);
+
+  const files = await readdir(spool);
+  assert.equal(files.length, 2);
+  const events = await Promise.all(files.map(async file => JSON.parse(await readFile(join(spool, file), 'utf8'))));
+  assert.deepEqual(events.map(event => event.status).sort(), ['problem', 'recovered']);
+  assert.ok(events.every(event => verifyEvent(event, key)));
+  assert.deepEqual(JSON.parse(await readFile(join(dirname(config), 'event-monitor-state.json'), 'utf8')), { 'api-service-1': 'healthy' });
+});
+
 test('producer passes configured container names as one inspect argument, never through a shell', { skip: !pythonAvailable }, async t => {
   const { config } = await fixture(t);
   const harness = String.raw`

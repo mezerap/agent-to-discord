@@ -348,7 +348,7 @@ The signed JSON spool is `event-inbox/` beside that configuration, owned by the 
 
 Authenticated changes reuse an incident thread per source/resource; repeated identical states are silent. The original data is kept under `artifacts/incidents`. No inference starts automatically. A human can request follow-up diagnostics in the thread. Creation/delivery is journaled before external effects; an uncertain result requires inspection instead of retries.
 
-`ops/coolify-events.py` is an optional host-side health sampler. Its private config contains `bridge_state_dir` (host volume path) and an allowlist of `containers`. Run from a protected service/timer on the host; it reads Docker state, signs transitions, and writes the spool. A healthy first sample is silent. It does not expose Docker to the agent. Other n8n/GitHub producers may use the same signed contract; they require separately configured verified source credentials/routing. This package does not automatically install workflows or public webhooks.
+`ops/coolify-events.py` is an optional host-side health sampler. Its private config contains `bridge_state_dir` (host volume path) and an allowlist of `containers`. Run from a protected service/timer on the host; it reads Docker state, signs transitions, and writes the spool. A healthy first sample and normal startup stay silent; `starting` preserves the previous stable state, so recovery is reported after a real problem. It does not expose Docker to the agent. Other n8n/GitHub producers may use the same signed contract; they require separately configured verified source credentials/routing. This package does not automatically install workflows or public webhooks.
 
 ## Clean start
 
